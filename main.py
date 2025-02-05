@@ -7,9 +7,11 @@ from keras.layers import Input, Conv1D, LSTM, Dense, TimeDistributed, Flatten
 # === 1. Загрузка и предобработка данных ===
 
 # Загрузка данных из CSV файла
-data = pd.read_csv('path_to_your_file.csv')  # Укажите путь к вашему файлу
+data = pd.read_csv('data.csv')  # Укажите путь к вашему файлу
 
 # Нормализация данных
+# Позволяет привести данные к одному диапазону и масштабу, что дает возможность
+# объединить различные признаки в одной модели без потери информации о различиях между ними
 scaler = MinMaxScaler()  # Создаем объект для нормализации
 scaled_data = scaler.fit_transform(data)  # Применяем нормализацию к данным
 

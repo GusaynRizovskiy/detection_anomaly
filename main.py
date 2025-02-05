@@ -1,8 +1,8 @@
+from keras.models import Model
+from keras.layers import Input, Conv1D, LSTM, Dense, TimeDistributed, Flatten
 import pandas as pd
 import numpy as np
 from sklearn.preprocessing import MinMaxScaler
-from keras.models import Model
-from keras.layers import Input, Conv1D, LSTM, Dense, TimeDistributed, Flatten
 
 # === 1. Загрузка данных из CSV файла ===
 data = pd.read_csv('data.csv', delimiter=';', encoding='cp1251')
@@ -19,10 +19,7 @@ data = data.replace(',', '.', regex=True)
 # Преобразуем данные в числовой формат
 data = data.apply(pd.to_numeric, errors='coerce')  # Преобразуем данные в числовой формат
 
-# Проверка на наличие NaN значений после преобразования
-if data.isnull().values.any():
-    print("Обнаружены NaN значения после преобразования. Проверьте данные.")
-
+# Нормализация данных
 scaler = MinMaxScaler()
 scaled_data = scaler.fit_transform(data)  # Нормализация данных
 

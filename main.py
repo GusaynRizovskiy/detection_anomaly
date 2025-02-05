@@ -1,22 +1,29 @@
-import numpy as np
 import pandas as pd
+import numpy as np
 from sklearn.preprocessing import MinMaxScaler
 from keras.models import Model
 from keras.layers import Input, Conv1D, LSTM, Dense, TimeDistributed, Flatten
 
-# === 1. Загрузка и предобработка данных ===
+# === 1. Загрузка данных из CSV файла ===
+# Укажите путь к вашему файлу и используйте правильную кодировку и разделитель
+data = pd.read_csv('data.csv', delimiter=';', encoding='cp1251')
 
-# Загрузка данных из CSV файла
-data = pd.read_csv('data.csv')  # Укажите путь к вашему файлу
+# === 2. Предобработка данных ===
+# Убираем лишние пробелы из имён колонок
+data.columns = data.columns.str.strip()
+
+# Удаляем колонку с временными метками
+if 'Время захвата пакетов' in data.columns:
+    data.drop(columns=['Время захвата пакетов'], inplace=True)
+
+# Преобразуем данные в числовой формат
+data = data.apply(pd.to_numeric, errors='coerce')
 
 # Нормализация данных
-# Позволяет привести данные к одному диапазону и масштабу, что дает возможность
-# объединить различные признаки в одной модели без потери информации о различиях между ними
-scaler = MinMaxScaler()  # Создаем объект для нормализации
+scaler = MinMaxScaler()
 scaled_data = scaler.fit_transform(data)  # Применяем нормализацию к данным
 
-
-# Преобразование данных в формат временных рядов
+# === 3. Создание временных рядов ===
 def create_dataset(data, time_step=1):
     X = []  # Список для хранения входных данных
     for i in range(len(data) - time_step):
@@ -24,13 +31,15 @@ def create_dataset(data, time_step=1):
         X.append(a)  # Добавляем его в X
     return np.array(X)  # Возвращаем массив X
 
-
-time_step = 10  # Количество временных шагов для анализа
+time_step = 10  # Устанавливаем количество временных шагов для анализа
 X = create_dataset(scaled_data, time_step)  # Создаем набор данных
 
+# Преобразуем данные в трёхмерный формат для Conv1D (если требуется)
+X = X.reshape(X.shape[0], X.shape[1], X.shape[2])  # Убедимся, что данные трёхмерные
 
-# === 2. Создание модели автоэнкодера на основе CNN и LSTM ===
+print("Форма входного набора:", X.shape)  # Проверяем форму полученного набора данных
 
+# === 4. Создание модели автоэнкодера на основе CNN и LSTM ===
 def build_cnn_lstm_autoencoder(input_shape):
     input_layer = Input(shape=input_shape)  # Входной слой с заданной формой
 
@@ -52,14 +61,13 @@ def build_cnn_lstm_autoencoder(input_shape):
 
     return model
 
-
 # Создаем автоэнкодер с формой входных данных (количество временных шагов и количество признаков)
 autoencoder = build_cnn_lstm_autoencoder((X.shape[1], X.shape[2]))
 
 # Обучение автоэнкодера на входных данных (X)
 autoencoder.fit(X, X, epochs=50, batch_size=32, validation_split=0.2)
 
-# === 3. Обнаружение аномалий ===
+# === 5. Обнаружение аномалий ===
 
 # Получение восстановленных данных от автоэнкодера
 reconstructed_data = autoencoder.predict(X)

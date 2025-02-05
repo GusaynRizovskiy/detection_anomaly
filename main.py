@@ -5,44 +5,18 @@ from keras.models import Model
 from keras.layers import Input, Conv1D, LSTM, Dense, TimeDistributed, Flatten
 
 # === 1. Загрузка данных из CSV файла ===
-try:
-    # Укажите путь к вашему файлу и используйте правильную кодировку и разделитель
-    data = pd.read_csv('path_to_your_file.csv', delimiter=';', encoding='cp1251')
-    print("Данные успешно загружены.")
-except FileNotFoundError:
-    print("Ошибка: Файл не найден. Проверьте путь к файлу.")
-    exit()
-except pd.errors.EmptyDataError:
-    print("Ошибка: Файл пуст.")
-    exit()
-except Exception as e:
-    print(f"Произошла ошибка при загрузке данных: {e}")
-    exit()
+data = pd.read_csv('data.csv', delimiter=';', encoding='cp1251')
 
 # === 2. Предобработка данных ===
-try:
-    # Убираем лишние пробелы из имён колонок
-    data.columns = data.columns.str.strip()
+data.columns = data.columns.str.strip()  # Убираем лишние пробелы из имён колонок
 
-    # Проверяем наличие колонки с временными метками и удаляем её
-    if 'Время захвата пакетов' in data.columns:
-        data.drop(columns=['Время захвата пакетов'], inplace=True)
+if 'Время захвата пакетов' in data.columns:
+    data.drop(columns=['Время захвата пакетов'], inplace=True)  # Удаляем колонку с временными метками
 
-    # Преобразуем данные в числовой формат
-    data = data.apply(pd.to_numeric, errors='coerce')
+data = data.apply(pd.to_numeric, errors='coerce')  # Преобразуем данные в числовой формат
 
-    # Нормализация данных
-    scaler = MinMaxScaler()
-    scaled_data = scaler.fit_transform(data)  # Применяем нормализацию к данным
-
-    print("Данные успешно предобработаны.")
-except KeyError as e:
-    print(f"Ошибка: Столбец не найден: {e}")
-except ValueError as e:
-    print(f"Ошибка при преобразовании данных: {e}")
-except Exception as e:
-    print(f"Произошла ошибка при предобработке данных: {e}")
-    exit()
+scaler = MinMaxScaler()
+scaled_data = scaler.fit_transform(data)  # Нормализация данных
 
 
 # === 3. Создание временных рядов ===
@@ -55,17 +29,12 @@ def create_dataset(data, time_step=1):
 
 
 time_step = 10  # Устанавливаем количество временных шагов для анализа
+X = create_dataset(scaled_data, time_step)  # Создаем набор данных
 
-try:
-    X = create_dataset(scaled_data, time_step)  # Создаем набор данных
+# Преобразуем данные в трёхмерный формат для Conv1D
+X = np.expand_dims(X, axis=-1)  # Добавляем третье измерение для признаков
 
-    # Преобразуем данные в трёхмерный формат для Conv1D
-    X = X.reshape(X.shape[0], X.shape[1], X.shape[2])  # Убедимся, что данные трёхмерные
-
-    print("Форма входного набора:", X.shape)  # Проверяем форму полученного набора данных
-except Exception as e:
-    print(f"Ошибка при создании временных рядов: {e}")
-    exit()
+print("Форма входного набора:", X.shape)  # Проверяем форму полученного набора данных
 
 
 # === 4. Создание модели автоэнкодера на основе CNN и LSTM ===
@@ -82,7 +51,7 @@ def build_cnn_lstm_autoencoder(input_shape):
     lstm_layer = LSTM(50, activation='relu', return_sequences=True)(flatten_layer)
 
     # Полносвязный слой декодера для восстановления временных рядов
-    decoder_layer = TimeDistributed(Dense(input_shape[1]))(lstm_layer)
+    decoder_layer = TimeDistributed(Dense(input_shape[2]))(lstm_layer)
 
     # Создание модели автоэнкодера
     model = Model(inputs=input_layer, outputs=decoder_layer)
@@ -93,7 +62,7 @@ def build_cnn_lstm_autoencoder(input_shape):
 
 
 try:
-    autoencoder = build_cnn_lstm_autoencoder((X.shape[1], X.shape[2]))  # Создаем автоэнкодер
+    autoencoder = build_cnn_lstm_autoencoder((X.shape[1], X.shape[2], X.shape[3]))  # Создаем автоэнкодер
 
     # Обучение автоэнкодера на входных данных (X)
     autoencoder.fit(X, X, epochs=50, batch_size=32, validation_split=0.2)

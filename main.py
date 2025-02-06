@@ -1,6 +1,5 @@
 from keras.models import Model
-from keras.layers import Input, Conv1D, LSTM, Dense, TimeDistributed, Flatten, RepeatVector
-from keras.layers import Conv1DTranspose
+from keras.layers import Input, Conv1D, LSTM, Dense, TimeDistributed, Flatten, RepeatVector,Conv1DTranspose
 import pandas as pd
 import numpy as np
 from sklearn.preprocessing import MinMaxScaler

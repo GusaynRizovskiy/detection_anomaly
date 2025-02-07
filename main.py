@@ -1,8 +1,12 @@
-from keras.models import Model
-from keras.layers import Input, Conv1D, LSTM, Dense, TimeDistributed, Flatten, RepeatVector,Conv1DTranspose
+from tensorflow.keras.models import Model
+from tensorflow.keras.layers import Input, Conv1D, LSTM, Dense, TimeDistributed, Flatten, RepeatVector,Conv1DTranspose
 import pandas as pd
 import numpy as np
 from sklearn.preprocessing import MinMaxScaler
+import os
+# Пример использования
+import numpy as np
+os.environ['TF_ENABLE_ONEDNN_OPTS'] = '0'
 
 # === 1. Загрузка данных ===
 data = pd.read_csv('data.csv', delimiter=';', encoding='cp1251')
@@ -39,22 +43,23 @@ print("Shape of input dataset:", X.shape)
 
 # === 4. CNN-LSTM Autoencoder Model ===
 def build_cnn_lstm_autoencoder(input_shape):
+    """
+    Автоэнкодер для 3D данных (timesteps, features).
+    :param input_shape: Кортеж (timesteps, features)
+    """
     input_layer = Input(shape=input_shape)
 
     # Encoder
-    conv_layer = TimeDistributed(Conv1D(filters=32, kernel_size=3, activation='relu', padding='same'))(input_layer)
-    flatten_layer = TimeDistributed(Flatten())(conv_layer)
-    lstm_layer = LSTM(50, activation='relu', return_sequences=False)(flatten_layer)
+    conv_encoder = Conv1D(32, kernel_size=3, activation='relu', padding='same')(input_layer)
+    lstm_encoder = LSTM(50, activation='relu', return_sequences=False)(conv_encoder)
 
     # Decoder
-    repeat_vector = RepeatVector(input_shape[0])(lstm_layer)  # Повторяем для временных шагов
-    lstm_decoder = LSTM(50, activation='relu', return_sequences=True)(repeat_vector) # return_sequences=True
-    time_distributed_layer = TimeDistributed(Dense(32, activation='relu'))(lstm_decoder)
-    conv_transpose_layer = TimeDistributed(Conv1DTranspose(filters=32, kernel_size=3, activation='relu', padding='same'))(time_distributed_layer)
-    output_layer = TimeDistributed(Dense(input_shape[2]))(conv_transpose_layer)  # Выходной слой
+    repeat = RepeatVector(input_shape[0])(lstm_encoder)  # Восстанавливаем временные шаги
+    lstm_decoder = LSTM(50, activation='relu', return_sequences=True)(repeat)
+    conv_decoder = Conv1D(32, kernel_size=3, activation='relu', padding='same')(lstm_decoder)
+    output_layer = Conv1D(input_shape[1], kernel_size=3, padding='same')(conv_decoder)  # Выходная форма = входной
 
-    # Autoencoder Model
-    model = Model(inputs=input_layer, outputs=output_layer)
+    model = Model(input_layer, output_layer)
     model.compile(optimizer='adam', loss='mse')
     return model
 
@@ -89,3 +94,6 @@ except ValueError as e:
     print(f"Anomaly detection error: {e}")
 except Exception as e:
     print(f"Error during anomaly detection: {e}")
+
+
+

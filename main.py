@@ -50,6 +50,7 @@ def build_cnn_lstm_autoencoder(input_shape):
     input_layer = Input(shape=input_shape)
 
     # Encoder
+    # Создает одномерный светрочный слой и применяет его к входным данным(входному слою)
     conv_encoder = Conv1D(32, kernel_size=3, activation='relu', padding='same')(input_layer)
     lstm_encoder = LSTM(50, activation='relu', return_sequences=False)(conv_encoder)
 
@@ -59,7 +60,7 @@ def build_cnn_lstm_autoencoder(input_shape):
     conv_decoder = Conv1D(32, kernel_size=3, activation='relu', padding='same')(lstm_decoder)
     output_layer = Conv1D(input_shape[1], kernel_size=3, padding='same')(conv_decoder)  # Выходная форма = входной
 
-    model = Model(input_layer, output_layer)
+    model = Model(inputs=input_layer, outputs=output_layer)
     model.compile(optimizer='adam', loss='mse')
     return model
 

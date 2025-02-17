@@ -53,6 +53,7 @@ def build_cnn_lstm_autoencoder(input_shape):
     # Создает одномерный светрочный слой и применяет его к входным данным(входному слою)
     conv_encoder = Conv1D(32, kernel_size=3, activation='relu', padding='same')(input_layer)
     lstm_encoder = LSTM(50, activation='relu', return_sequences=False)(conv_encoder)
+    #returen_sequences = False возвращается только последнее выходное состояние, а не вся последовательность выходов.
 
     # Decoder
     repeat = RepeatVector(input_shape[0])(lstm_encoder)  # Восстанавливаем временные шаги
@@ -66,10 +67,11 @@ def build_cnn_lstm_autoencoder(input_shape):
 
 try:
     # Building model
+    #X.shape[1] - timesteps, X.shape[2] - features. Передаем значения в виде кортежа input_shape
     autoencoder = build_cnn_lstm_autoencoder((X.shape[1], X.shape[2]))
 
     # Model Training
-    autoencoder.fit(X, X, epochs=50, batch_size=32, validation_split=0.2)  # Train to reconstruct the entire sequence
+    autoencoder.fit(X, X, epochs=20, batch_size=32, validation_split=0.2)  # Train to reconstruct the entire sequence
 
     print("Model trained successfully.")
 except Exception as e:

@@ -80,6 +80,7 @@ except Exception as e:
     exit()
 
 # === 5. Обнаружение аномалий в новом файле ===
+# Работа с файлом, который содержит аномалии
 try:
     # Загрузка и подготовка новых данных с аномалиями
     new_scaled_data = load_and_preprocess_data('proverka_data.csv')

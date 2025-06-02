@@ -1,6 +1,5 @@
 from datetime import datetime
 
-from django.contrib.sites import requests
 from tensorflow.keras.models import Model
 from tensorflow.keras.layers import Input, Conv1D, LSTM, Dense, TimeDistributed, Flatten, RepeatVector
 import pandas as pd
@@ -78,7 +77,7 @@ try:
     autoencoder = build_cnn_lstm_autoencoder((X_train.shape[1], X_train.shape[2]))
 
     # Model Training
-    autoencoder.fit(X_train, X_train, epochs=20, batch_size=32, validation_split=0.2)
+    autoencoder.fit(X_train, X_train, epochs=50, batch_size=32, validation_split=0.2)
 
     print("Model trained successfully.")
 except Exception as e:

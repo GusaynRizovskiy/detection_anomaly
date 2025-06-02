@@ -1,3 +1,6 @@
+from datetime import datetime
+
+from django.contrib.sites import requests
 from tensorflow.keras.models import Model
 from tensorflow.keras.layers import Input, Conv1D, LSTM, Dense, TimeDistributed, Flatten, RepeatVector
 import pandas as pd
@@ -91,21 +94,55 @@ try:
     # Reshape X to (samples, time_steps, features)
     X_new = X_new.reshape(X_new.shape[0], time_step, new_scaled_data.shape[1])
 
-    # Прогнозирование с помощью автоэнкодера
-    reconstructed_data = autoencoder.predict(X_new)
+    # Загрузка заранее вычисленного порога (или задайте вручную)
+    # Например, threshold = 0.01
+    threshold = ...  # Загрузите или задайте порог
 
-    # Вычислить ошибку реконструкции (MSE) для каждой последовательности
-    mse = np.mean(np.power(X_new - reconstructed_data, 2), axis=(1, 2))
+    for idx in range(X_new.shape[0]):
+        sample = X_new[idx:idx+1]  # Выделяем одно окно с нужной размерностью
+        reconstructed_sample = autoencoder.predict(sample)
+        mse_value = np.mean(np.power(sample - reconstructed_sample, 2))
 
-    # Установить порог для обнаружения аномалий
-    threshold = np.mean(mse) + 3 * np.std(mse)
+        if mse_value > threshold:
+            anomaly_event = {
+                "timestamp": datetime.datetime.utcnow().isoformat() + "Z",
+                "anomaly_type": "anomaly",
+                "anomaly_score": float(mse_value),
+                "description": "Обнаружена аномалия автоэнкодером. Ошибка реконструкции превышает порог.",
+                "job_id": "autoencoder_ddos_2025",
+                "sequence_index": int(idx),
+                "mse_value": float(mse_value),
+                "status": "THREAT",
+                "host": "server01",
+                "version": "1.0"
+            }
+            # Здесь вызовите функцию отправки в SIEM, например:
+            send_to_siem(anomaly_event)
 
-    # Идентифицировать аномалии
-    anomalies = mse > threshold
 
-    # Вывести индексы аномалий
-    print("Аномалии найдены по индексам:", np.where(anomalies)[0])
+        # Отправка данных в SIEM систему
+        def send_to_siem(json_data):
+            """
+            Отправляет событие аномалии в SIEM-систему через HTTP POST.
+
+            Args:
+                json_data (dict): Словарь с данными аномалии, который будет преобразован в JSON.
+            """
+            url = "https://your-siem-api.example.com/events"  # Замените на URL вашего SIEM API
+            headers = {'Content-Type': 'application/json'}
+
+            try:
+                response = requests.post(url, headers=headers, data=json.dumps(json_data))
+                if response.status_code == 200:
+                    print(f"Аномалия успешно отправлена: sequence_index={json_data.get('sequence_index')}")
+                else:
+                    print(f"Ошибка отправки в SIEM: {response.status_code} - {response.text}")
+            except requests.exceptions.RequestException as e:
+                print(f"Ошибка при отправке в SIEM: {e}")
+
 except ValueError as e:
     print(f"Anomaly detection error: {e}")
 except Exception as e:
     print(f"Error during anomaly detection: {e}")
+
+

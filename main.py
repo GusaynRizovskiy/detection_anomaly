@@ -1,5 +1,5 @@
 from datetime import datetime
-
+import matplotlib.pyplot as plt
 from tensorflow.keras.models import Model
 from tensorflow.keras.layers import Input, Conv1D, LSTM, Dense, TimeDistributed, Flatten, RepeatVector
 import pandas as pd
@@ -78,6 +78,11 @@ try:
 
     # Model Training
     autoencoder.fit(X_train, X_train, epochs=50, batch_size=32, validation_split=0.2)
+    # После обучения модели (до раздела 5)
+    train_reconstructed = autoencoder.predict(X_train)
+    train_mse = np.mean(np.power(X_train - train_reconstructed, 2), axis=(1, 2))
+    threshold = np.percentile(train_mse, 99)  # 99-й перцентиль
+    np.save('threshold.npy', threshold)  # Сохранение порога
 
     print("Model trained successfully.")
 except Exception as e:
@@ -98,7 +103,7 @@ try:
 
     # Загрузка заранее вычисленного порога (или задайте вручную)
     # Например, threshold = 0.01
-    threshold = ...  # Загрузите или задайте порог
+    threshold = np.load('threshold.npy')
 
     for idx in range(X_new.shape[0]):
         sample = X_new[idx:idx+1]  # Выделяем одно окно с нужной размерностью
@@ -141,6 +146,19 @@ try:
                     print(f"Ошибка отправки в SIEM: {response.status_code} - {response.text}")
             except requests.exceptions.RequestException as e:
                 print(f"Ошибка при отправке в SIEM: {e}")
+
+    # Визуализация MSE и порога
+    mse_values = [np.mean(np.power(X_new[i:i + 1] - autoencoder.predict(X_new[i:i + 1]), 2))
+                  for i in range(X_new.shape[0])]
+
+    plt.figure(figsize=(12, 6))
+    plt.plot(mse_values, label='MSE')
+    plt.axhline(threshold, color='r', linestyle='--', label='Порог аномалий')
+    plt.xlabel('Временные интервалы')
+    plt.ylabel('MSE')
+    plt.legend()
+    plt.title('Обнаружение аномалий')
+    plt.show()
 
 except ValueError as e:
     print(f"Anomaly detection error: {e}")

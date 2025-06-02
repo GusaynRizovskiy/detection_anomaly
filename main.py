@@ -32,10 +32,13 @@ def load_and_preprocess_data(file_path):
 # === 2. Создание временных рядов ===
 def create_dataset(data, time_step=1):
     X = []
+    indices = []
     for i in range(len(data) - time_step):
         a = data[i:(i + time_step), :]
         X.append(a)
-    return np.array(X)
+        indices.append(i)  # индекс начала окна
+    return np.array(X), indices
+
 
 
 # === 3. CNN-LSTM Autoencoder Model ===

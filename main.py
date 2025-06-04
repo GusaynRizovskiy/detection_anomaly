@@ -6,12 +6,16 @@ import pandas as pd
 import numpy as np
 from sklearn.preprocessing import MinMaxScaler
 import os
+from sklearn.metrics import confusion_matrix, classification_report, accuracy_score, precision_score, recall_score, \
+    f1_score
+import seaborn as sns
 
 os.environ['TF_ENABLE_ONEDNN_OPTS'] = '0'
 
 
 # === 1. Загрузка и предварительная обработка данных ===
-def load_and_preprocess_data(file_path):
+def load_and_preprocess_data(file_path, scaler=None, fit_scaler=False):
+    """Загрузка и нормализация данных. Возвращает scaled_data и scaler"""
     data = pd.read_csv(file_path, delimiter=';', encoding='cp1251')
     data.columns = data.columns.str.strip()
 
@@ -19,25 +23,40 @@ def load_and_preprocess_data(file_path):
         data.drop(columns=['Время захвата пакетов'], inplace=True)
 
     data = data.replace(',', '.', regex=True)
-    data = data.apply(pd.to_numeric, errors='coerce')
+    data = data.apply(pd.to_numeric, errors='coerce').fillna(0)
 
     # Нормализация данных
-    scaler = MinMaxScaler()
-    scaled_data = scaler.fit_transform(data)
+    if scaler is None:
+        scaler = MinMaxScaler()
 
-    return scaled_data
+    if fit_scaler:
+        scaled_data = scaler.fit_transform(data)
+    else:
+        scaled_data = scaler.transform(data)
+
+    return scaled_data, scaler
+
+
+def load_labels(file_path, time_step):
+    """Загрузка меток из файла CIC-IDS2017 и создание меток для окон"""
+    labels_data = pd.read_csv(file_path)
+    labels = labels_data['Label'].apply(lambda x: 1 if x != 'BENIGN' else 0)  # Бинарные метки
+
+    # Создание меток для окон
+    window_labels = []
+    for i in range(len(labels) - time_step):
+        window_label = labels.iloc[i:i + time_step]
+        window_labels.append(1 if window_label.any() else 0)
+
+    return np.array(window_labels)
 
 
 # === 2. Создание временных рядов ===
 def create_dataset(data, time_step=1):
     X = []
-    indices = []
     for i in range(len(data) - time_step):
-        a = data[i:(i + time_step), :]
-        X.append(a)
-        indices.append(i)  # индекс начала окна
-    return np.array(X), indices
-
+        X.append(data[i:(i + time_step), :])
+    return np.array(X)
 
 
 # === 3. CNN-LSTM Autoencoder Model ===
@@ -59,110 +78,104 @@ def build_cnn_lstm_autoencoder(input_shape):
     return model
 
 
-# === 4. Обучение модели на исходных данных ===
+# === 4. Обучение модели на нормальном трафике ===
 try:
-    # Загрузка и подготовка исходных данных
-    scaled_data = load_and_preprocess_data('learning_data.csv')
+    # Загрузка и подготовка исходных данных (только нормальный трафик)
+    scaled_data, scaler = load_and_preprocess_data('normal_traffic.csv', fit_scaler=True)
 
     # Создание временных рядов
     time_step = 10
     X_train = create_dataset(scaled_data, time_step)
-
-    # Reshape X to (samples, time_steps, features)
     X_train = X_train.reshape(X_train.shape[0], time_step, scaled_data.shape[1])
+    print("Shape of training data:", X_train.shape)
 
-    print("Shape of input dataset:", X_train.shape)
-
-    # Building model
+    # Построение и обучение модели
     autoencoder = build_cnn_lstm_autoencoder((X_train.shape[1], X_train.shape[2]))
-
-    # Model Training
     autoencoder.fit(X_train, X_train, epochs=50, batch_size=32, validation_split=0.2)
-    # После обучения модели (до раздела 5)
+
+    # Определение порога аномалий
     train_reconstructed = autoencoder.predict(X_train)
     train_mse = np.mean(np.power(X_train - train_reconstructed, 2), axis=(1, 2))
     threshold = np.percentile(train_mse, 99)  # 99-й перцентиль
-    np.save('threshold.npy', threshold)  # Сохранение порога
+    np.save('threshold.npy', threshold)
+    np.save('scaler.npy', scaler)  # Сохраняем scaler для последующего использования
 
-    print("Model trained successfully.")
+    print(f"Model trained successfully. Anomaly threshold: {threshold:.4f}")
 except Exception as e:
-    print(f"Error building or training the model: {e}")
+    print(f"Error during training: {e}")
     exit()
 
-# === 5. Обнаружение аномалий в новом файле ===
-# Работа с файлом, который содержит аномалии
+# === 5. Тестирование на данных с аномалиями ===
 try:
-    # Загрузка и подготовка новых данных с аномалиями
-    new_scaled_data = load_and_preprocess_data('proverka_data.csv')
-
-    # Создание временных рядов для новых данных
-    X_new = create_dataset(new_scaled_data, time_step)
-
-    # Reshape X to (samples, time_steps, features)
-    X_new = X_new.reshape(X_new.shape[0], time_step, new_scaled_data.shape[1])
-
-    # Загрузка заранее вычисленного порога (или задайте вручную)
-    # Например, threshold = 0.01
+    # Загрузка scaler'а и порога
+    scaler = np.load('scaler.npy', allow_pickle=True).item()
     threshold = np.load('threshold.npy')
 
-    for idx in range(X_new.shape[0]):
-        sample = X_new[idx:idx+1]  # Выделяем одно окно с нужной размерностью
-        reconstructed_sample = autoencoder.predict(sample)
-        mse_value = np.mean(np.power(sample - reconstructed_sample, 2))
+    # Загрузка тестовых данных (с аномалиями)
+    test_data, _ = load_and_preprocess_data('test_traffic.csv', scaler=scaler)
+    X_test = create_dataset(test_data, time_step)
+    X_test = X_test.reshape(X_test.shape[0], time_step, test_data.shape[1])
 
-        if mse_value > threshold:
-            anomaly_event = {
-                "timestamp": datetime.datetime.utcnow().isoformat() + "Z",
-                "anomaly_type": "anomaly",
-                "anomaly_score": float(mse_value),
-                "description": "Обнаружена аномалия автоэнкодером. Ошибка реконструкции превышает порог.",
-                "job_id": "autoencoder_ddos_2025",
-                "sequence_index": int(idx),
-                "mse_value": float(mse_value),
-                "status": "THREAT",
-                "host": "server01",
-                "version": "1.0"
-            }
-            # Здесь вызовите функцию отправки в SIEM, например:
-            send_to_siem(anomaly_event)
+    # Загрузка меток из отдельного файла CIC-IDS2017
+    y_test = load_labels('Tuesday-WorkingHours.pcap_ISCX.csv', time_step)
 
+    # Проверка совпадения размеров
+    if len(y_test) != X_test.shape[0]:
+        min_length = min(len(y_test), X_test.shape[0])
+        y_test = y_test[:min_length]
+        X_test = X_test[:min_length]
+        print(f"Adjusted shapes to match: X_test {X_test.shape}, y_test {y_test.shape}")
 
-        # Отправка данных в SIEM систему
-        def send_to_siem(json_data):
-            """
-            Отправляет событие аномалии в SIEM-систему через HTTP POST.
+    # Вычисление MSE и предсказание аномалий
+    mse_values = []
+    for i in range(X_test.shape[0]):
+        reconstructed = autoencoder.predict(X_test[i:i + 1], verbose=0)
+        mse = np.mean(np.power(X_test[i:i + 1] - reconstructed, 2))
+        mse_values.append(mse)
 
-            Args:
-                json_data (dict): Словарь с данными аномалии, который будет преобразован в JSON.
-            """
-            url = "https://your-siem-api.example.com/events"  # Замените на URL вашего SIEM API
-            headers = {'Content-Type': 'application/json'}
+    y_pred = np.array([1 if mse > threshold else 0 for mse in mse_values])
 
-            try:
-                response = requests.post(url, headers=headers, data=json.dumps(json_data))
-                if response.status_code == 200:
-                    print(f"Аномалия успешно отправлена: sequence_index={json_data.get('sequence_index')}")
-                else:
-                    print(f"Ошибка отправки в SIEM: {response.status_code} - {response.text}")
-            except requests.exceptions.RequestException as e:
-                print(f"Ошибка при отправке в SIEM: {e}")
+    # Оценка эффективности
+    print("\n=== Classification Report ===")
+    print(classification_report(y_test, y_pred, target_names=['Normal', 'Anomaly']))
 
-    # Визуализация MSE и порога
-    mse_values = [np.mean(np.power(X_new[i:i + 1] - autoencoder.predict(X_new[i:i + 1]), 2))
-                  for i in range(X_new.shape[0])]
+    print("\n=== Confusion Matrix ===")
+    cm = confusion_matrix(y_test, y_pred)
+    print(cm)
 
-    plt.figure(figsize=(12, 6))
+    # Визуализация результатов
+    plt.figure(figsize=(15, 10))
+
+    # График MSE с порогом
+    plt.subplot(2, 1, 1)
     plt.plot(mse_values, label='MSE')
-    plt.axhline(threshold, color='r', linestyle='--', label='Порог аномалий')
-    plt.xlabel('Временные интервалы')
+    plt.axhline(threshold, color='r', linestyle='--', label=f'Threshold: {threshold:.4f}')
+    plt.xlabel('Time windows')
     plt.ylabel('MSE')
+    plt.title('Anomaly Detection Results')
     plt.legend()
-    plt.title('Обнаружение аномалий')
+
+    # График истинных и предсказанных меток
+    plt.subplot(2, 1, 2)
+    plt.plot(y_test, 'g-', label='True labels')
+    plt.plot(y_pred, 'r--', label='Predicted labels', alpha=0.7)
+    plt.xlabel('Time windows')
+    plt.ylabel('Label (0=Normal, 1=Anomaly)')
+    plt.title('True vs Predicted Anomalies')
+    plt.legend()
+
+    plt.tight_layout()
     plt.show()
 
-except ValueError as e:
-    print(f"Anomaly detection error: {e}")
+    # Матрица ошибок
+    plt.figure(figsize=(6, 5))
+    sns.heatmap(cm, annot=True, fmt='d', cmap='Blues',
+                xticklabels=['Normal', 'Anomaly'],
+                yticklabels=['Normal', 'Anomaly'])
+    plt.xlabel('Predicted')
+    plt.ylabel('Actual')
+    plt.title('Confusion Matrix')
+    plt.show()
+
 except Exception as e:
-    print(f"Error during anomaly detection: {e}")
-
-
+    print(f"Error during testing: {e}")

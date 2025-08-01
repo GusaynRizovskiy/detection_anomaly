@@ -9,7 +9,7 @@
 
 
 from PyQt5 import QtCore, QtGui, QtWidgets
-
+from PyQt5.QtWidgets import QPlainTextEdit, QVBoxLayout, QHBoxLayout, QGridLayout, QComboBox, QLineEdit, QSpinBox
 
 class Ui_Dialog(object):
     def setupUi(self, Dialog):
@@ -69,6 +69,7 @@ class Ui_Dialog(object):
         self.label_name_batch_size = QtWidgets.QLabel(self.widget)
         font = QtGui.QFont()
         font.setFamily("Tw Cen MT Condensed Extra Bold")
+        # ИСПРАВЛЕНО: Должно быть font.setPointSize(13)
         font.setPointSize(13)
         self.label_name_batch_size.setFont(font)
         self.label_name_batch_size.setObjectName("label_name_batch_size")
@@ -221,7 +222,6 @@ class Ui_Dialog(object):
         font = QtGui.QFont()
         font.setFamily("Tw Cen MT Condensed Extra Bold")
         font.setPointSize(13)
-        self.label_name_information_about_work_network.setFont(font)
         self.label_name_information_about_work_network.setAlignment(QtCore.Qt.AlignCenter)
         self.label_name_information_about_work_network.setObjectName("label_name_information_about_work_network")
         self.verticalLayout_6.addWidget(self.label_name_information_about_work_network)
@@ -346,6 +346,6 @@ class Ui_Dialog(object):
         self.label_name_test_model.setText(_translate("Dialog", "Для тестирования модели на реальном объекте"))
         self.pushButton_test_model.setText(_translate("Dialog", "Тестировать модель"))
         self.label_name_information_about_work_network.setText(_translate("Dialog", "Информация о работе нейронной сети"))
-        self.label_name_widget_plot_reconstruction_error.setText(_translate("Dialog", "График ошибки реконструкции"))
+        self.label_name_widget_plot_reconstruction_error.setText(_translate("Dialog", "График ошибки реконструкции (MSE)"))
         self.label_widget_name_plot_loss.setText(_translate("Dialog", "График ошибки обучения и валидации"))
-        self.label_name_widget_plot_anomaly_comparison.setText(_translate("Dialog", "График ошибки обучения и валидации"))
+        self.label_name_widget_plot_anomaly_comparison.setText(_translate("Dialog", "Сравнение: предсказания vs истинные аномалии"))

@@ -22,7 +22,6 @@ from tensorflow.keras.layers import Input, Conv1D, LSTM, RepeatVector
 from tensorflow.keras.metrics import MeanSquaredError
 from tensorflow.keras.losses import MeanSquaredError as mse_loss
 
-
 # Импортируем класс UI-формы из модуля form_of_network и новый класс Worker
 from form_of_network import Ui_Dialog
 from worker import Worker  # Импортируем новый класс
@@ -106,6 +105,29 @@ class AutoencoderApp(QtWidgets.QDialog, Ui_Dialog):
 
         # Вывод приветственного сообщения
         self.update_status("Программа запущена. Загрузите файлы для обучения или тестирования.")
+
+        # Начальное состояние кнопок
+        self.set_ui_state_initial()
+
+    def set_ui_state_initial(self):
+        """Устанавливает начальное состояние кнопок."""
+        self.pushButton_load_file_for_learning.setEnabled(True)
+        self.pushButton_learn_model.setEnabled(True)
+        self.pushButton_save_model.setEnabled(False)  # Сначала нет обученной модели
+        self.pushButton_load_model.setEnabled(True)
+        self.pushButton_load_test_file.setEnabled(False)  # Нельзя тестировать без модели
+        self.pushButton_test_model.setEnabled(False)  # Нельзя тестировать без модели
+        self.pushButton_vvod_data.setEnabled(True)
+
+    def set_ui_state_after_learning_or_loading(self):
+        """Устанавливает состояние кнопок после обучения или загрузки модели."""
+        self.pushButton_load_file_for_learning.setEnabled(False)  # Нельзя обучать, пока не сброшены настройки
+        self.pushButton_learn_model.setEnabled(False)
+        self.pushButton_save_model.setEnabled(True)
+        self.pushButton_load_model.setEnabled(False)  # Нельзя загружать, пока уже есть модель
+        self.pushButton_load_test_file.setEnabled(True)
+        self.pushButton_test_model.setEnabled(True)
+        self.pushButton_vvod_data.setEnabled(False)
 
     def closeEvent(self, event):
         self.worker_thread.quit()
@@ -232,6 +254,12 @@ class AutoencoderApp(QtWidgets.QDialog, Ui_Dialog):
                                 "Значения 'Временной шаг', 'Количество эпох' и 'Размер батча' не могут быть равны 0. Пожалуйста, введите корректные значения.")
             return
 
+        # Блокировка кнопок во время обучения
+        self.pushButton_load_file_for_learning.setEnabled(False)
+        self.pushButton_learn_model.setEnabled(False)
+        self.pushButton_load_model.setEnabled(False)
+        self.pushButton_save_model.setEnabled(False)
+
         self.epoch_x.clear()
         self.train_loss_y.clear()
         self.val_loss_y.clear()
@@ -244,6 +272,9 @@ class AutoencoderApp(QtWidgets.QDialog, Ui_Dialog):
         self.threshold = results['threshold']
         self.spinBox_porog_anomaly_value.setValue(self.threshold)
         self.update_status(f"Автоматически рассчитанный порог аномалии: {self.threshold:.4f}")
+
+        # Разблокировка кнопок после обучения
+        self.set_ui_state_after_learning_or_loading()
 
     def save_model(self):
         if self.worker.autoencoder is None or self.worker.scaler is None:
@@ -282,6 +313,7 @@ class AutoencoderApp(QtWidgets.QDialog, Ui_Dialog):
                         self.worker.scaler = pickle.load(f)
                     self.update_status(f"✅ Модель успешно загружена из: {file_path}")
                     self.update_status("✅ Скейлер для нормализации успешно загружен.")
+                    self.set_ui_state_after_learning_or_loading()
                 else:
                     QMessageBox.warning(self, "Предупреждение", "Файл скейлера не найден. Загружена только модель.")
                     self.worker.scaler = None
@@ -289,6 +321,7 @@ class AutoencoderApp(QtWidgets.QDialog, Ui_Dialog):
             except Exception as e:
                 QMessageBox.critical(self, "Ошибка загрузки", f"Не удалось загрузить модель: {e}")
                 logging.error("Ошибка при загрузке модели", exc_info=True)
+                self.set_ui_state_initial()
 
     def start_testing(self):
         if self.worker.autoencoder is None:

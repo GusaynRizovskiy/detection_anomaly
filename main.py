@@ -1,6 +1,11 @@
 # -*- coding: utf-8 -*-
 
 import os
+# Эти строки нужно разместить как можно раньше,
+# чтобы они вступили в силу до первого импорта TensorFlow.
+os.environ['TF_ENABLE_ONEDNN_OPTS'] = '0'
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
+
 import sys
 import json
 from datetime import datetime
@@ -16,8 +21,8 @@ from sklearn.preprocessing import MinMaxScaler
 from tensorflow.keras.models import Model, load_model
 from tensorflow.keras.layers import Input, Conv1D, LSTM, RepeatVector
 
-os.environ['TF_ENABLE_ONEDNN_OPTS'] = '0'
-os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
+# Импортируем класс UI-формы из модуля form_of_network
+from form_of_network import Ui_Dialog
 
 # Импортируем класс UI-формы из модуля form_of_network
 from form_of_network import Ui_Dialog

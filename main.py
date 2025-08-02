@@ -17,6 +17,11 @@ from PyQt5.QtWidgets import QFileDialog, QMessageBox, QDoubleSpinBox
 from PyQt5.QtGui import QPalette, QBrush, QPixmap
 from tensorflow.keras.models import load_model
 import pickle
+from tensorflow.keras.models import load_model
+from tensorflow.keras.layers import Input, Conv1D, LSTM, RepeatVector
+from tensorflow.keras.metrics import MeanSquaredError
+from tensorflow.keras.losses import MeanSquaredError as mse_loss
+
 
 # Импортируем класс UI-формы из модуля form_of_network и новый класс Worker
 from form_of_network import Ui_Dialog
@@ -80,9 +85,7 @@ class AutoencoderApp(QtWidgets.QDialog, Ui_Dialog):
         self.worker.learning_finished.connect(self.handle_learning_results)
         self.worker.testing_finished.connect(self.handle_testing_results)
         self.worker.update_status_signal.connect(self.update_status)
-        # НОВОЕ ПОДКЛЮЧЕНИЕ: Сигнал для обновления графиков во время обучения
         self.worker.update_plot_signal.connect(self.update_learning_plot)
-
 
         self.worker_thread.start()
 
@@ -104,19 +107,16 @@ class AutoencoderApp(QtWidgets.QDialog, Ui_Dialog):
         # Вывод приветственного сообщения
         self.update_status("Программа запущена. Загрузите файлы для обучения или тестирования.")
 
-    # Переопределяем метод закрытия, чтобы безопасно остановить поток
     def closeEvent(self, event):
         self.worker_thread.quit()
         self.worker_thread.wait()
         event.accept()
 
     def resizeEvent(self, event):
-        """Обработчик события изменения размера окна."""
         self.update_background()
         super().resizeEvent(event)
 
     def update_background(self):
-        """Метод для установки и масштабирования фонового изображения, с проверкой для консоли."""
         try:
             if os.path.exists(self.background_image_path):
                 palette = QPalette()
@@ -146,13 +146,9 @@ class AutoencoderApp(QtWidgets.QDialog, Ui_Dialog):
 
     # --- Функции для GUI ---
     def update_status(self, message):
-        """Обновляет текстовое поле статуса."""
-        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        self.text_zone.appendPlainText(f"[{timestamp}] {message}")
+        self.text_zone.appendPlainText(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] {message}")
 
     def setup_plots(self):
-        """Настраивает виджеты для графиков."""
-
         pg.setConfigOption('background', 'w')
         pg.setConfigOption('foreground', 'k')
 
@@ -184,34 +180,32 @@ class AutoencoderApp(QtWidgets.QDialog, Ui_Dialog):
         self.curve_true_anomalies = self.plot_anomaly_comparison.plot(pen='b', name='Истинные аномалии')
         self.curve_predicted_anomalies = self.plot_anomaly_comparison.plot(pen='r', name='Предсказания модели')
 
-    # НОВЫЙ СЛОТ: Обновление графиков во время обучения
     @QtCore.pyqtSlot(dict)
     def update_learning_plot(self, epoch_logs):
+        if not self.worker.is_learning_running:
+            return
+
         self.epoch_x.append(epoch_logs['epoch'])
         self.train_loss_y.append(epoch_logs['loss'])
         self.val_loss_y.append(epoch_logs['val_loss'])
         self.curve_train_loss.setData(self.epoch_x, self.train_loss_y)
         self.curve_val_loss.setData(self.epoch_x, self.val_loss_y)
-        self.update_status(f"Эпоха {epoch_logs['epoch']}: Loss = {epoch_logs['loss']:.4f}, Val Loss = {epoch_logs['val_loss']:.4f}")
+        self.update_status(
+            f"Эпоха {epoch_logs['epoch']}: Loss = {epoch_logs['loss']:.4f}, Val Loss = {epoch_logs['val_loss']:.4f}")
 
-
-    # --- Функции для работы с файлами ---
     def load_learning_file(self):
-        """Загружает файл для обучения."""
         file_path, _ = QFileDialog.getOpenFileName(self, "Выбрать файл для обучения", "", "CSV Files (*.csv)")
         if file_path:
             self.learning_file_path = file_path
             self.update_status(f"Файл для обучения выбран: {file_path}")
 
     def load_test_file(self):
-        """Загружает файл для тестирования."""
         file_path, _ = QFileDialog.getOpenFileName(self, "Выбрать файл для тестирования", "", "CSV Files (*.csv)")
         if file_path:
             self.test_file_path = file_path
             self.update_status(f"Файл для тестирования выбран: {file_path}")
 
     def check_and_accept_parameters(self):
-        """Проверяет заполненность полей и принимает параметры."""
         time_step = self.spinBox_timestep_value.value()
         epochs = self.spinBox_epochs_value.value()
         batch_size = self.spinBox_batch_size_value.value()
@@ -224,9 +218,7 @@ class AutoencoderApp(QtWidgets.QDialog, Ui_Dialog):
             self.update_status("✅ Параметры успешно введены и приняты.")
             QMessageBox.information(self, "Успешный ввод", "Параметры обучения и тестирования приняты.")
 
-    # --- Функции-слоты для управления рабочим потоком ---
     def start_learning(self):
-        """Запускает процесс обучения с проверкой параметров."""
         if not self.learning_file_path:
             QMessageBox.warning(self, "Ошибка", "Пожалуйста, сначала выберите файл для обучения.")
             return
@@ -240,21 +232,20 @@ class AutoencoderApp(QtWidgets.QDialog, Ui_Dialog):
                                 "Значения 'Временной шаг', 'Количество эпох' и 'Размер батча' не могут быть равны 0. Пожалуйста, введите корректные значения.")
             return
 
-        # Перед началом обучения очищаем данные для графика
         self.epoch_x.clear()
         self.train_loss_y.clear()
         self.val_loss_y.clear()
+        self.curve_train_loss.setData([], [])
+        self.curve_val_loss.setData([], [])
 
         self.start_learning_signal.emit(self.learning_file_path, time_step, epochs, batch_size)
 
     def handle_learning_results(self, results):
-        """Слот для обработки результатов обучения из рабочего потока."""
         self.threshold = results['threshold']
         self.spinBox_porog_anomaly_value.setValue(self.threshold)
         self.update_status(f"Автоматически рассчитанный порог аномалии: {self.threshold:.4f}")
 
     def save_model(self):
-        """Сохраняет обученную модель и scaler."""
         if self.worker.autoencoder is None or self.worker.scaler is None:
             QMessageBox.warning(self, "Ошибка", "Сначала обучите или загрузите модель.")
             return
@@ -269,20 +260,37 @@ class AutoencoderApp(QtWidgets.QDialog, Ui_Dialog):
                 QMessageBox.critical(self, "Ошибка сохранения", f"Не удалось сохранить модель: {e}")
 
     def load_model(self):
-        """Загружает ранее обученную модель."""
         file_path, _ = QFileDialog.getOpenFileName(self, "Загрузить модель", "", "HDF5 Files (*.h5)")
         if file_path:
             try:
-                self.worker.autoencoder = load_model(file_path)
-                self.update_status(f"✅ Модель успешно загружена из: {file_path}")
-                with open(file_path.replace('.h5', '_scaler.pkl'), 'rb') as f:
-                    self.worker.scaler = pickle.load(f)
-                self.update_status("✅ Скейлер для нормализации успешно загружен.")
+                if not os.path.exists(file_path):
+                    QMessageBox.critical(self, "Ошибка загрузки", "Файл модели не найден по указанному пути.")
+                    return
+
+                # Попытка загрузки модели с указанием custom_objects
+                # Здесь мы явно говорим Keras, как найти 'mse' и 'MeanSquaredError'
+                custom_objects = {
+                    'mse': mse_loss,
+                    'MeanSquaredError': MeanSquaredError
+                }
+                self.worker.autoencoder = load_model(file_path, custom_objects=custom_objects)
+
+                # Попытка загрузки скейлера
+                scaler_path = file_path.replace('.h5', '_scaler.pkl')
+                if os.path.exists(scaler_path):
+                    with open(scaler_path, 'rb') as f:
+                        self.worker.scaler = pickle.load(f)
+                    self.update_status(f"✅ Модель успешно загружена из: {file_path}")
+                    self.update_status("✅ Скейлер для нормализации успешно загружен.")
+                else:
+                    QMessageBox.warning(self, "Предупреждение", "Файл скейлера не найден. Загружена только модель.")
+                    self.worker.scaler = None
+                    self.update_status(f"✅ Модель успешно загружена из: {file_path}, но скейлер не найден.")
             except Exception as e:
                 QMessageBox.critical(self, "Ошибка загрузки", f"Не удалось загрузить модель: {e}")
+                logging.error("Ошибка при загрузке модели", exc_info=True)
 
     def start_testing(self):
-        """Запускает процесс тестирования с проверкой параметров."""
         if self.worker.autoencoder is None:
             QMessageBox.warning(self, "Ошибка", "Сначала обучите или загрузите модель.")
             return
@@ -305,7 +313,6 @@ class AutoencoderApp(QtWidgets.QDialog, Ui_Dialog):
         self.start_testing_signal.emit(self.test_file_path, time_step, threshold)
 
     def handle_testing_results(self, results):
-        """Слот для обработки результатов тестирования из рабочего потока."""
         threshold = self.spinBox_porog_anomaly_value.value()
 
         self.curve_reconstruction_error.setData(results['reconstruction_errors'])

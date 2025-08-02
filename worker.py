@@ -40,7 +40,6 @@ class Worker(QtCore.QObject):
     learning_finished = QtCore.pyqtSignal(dict)
     testing_finished = QtCore.pyqtSignal(dict)
     update_status_signal = QtCore.pyqtSignal(str)
-    # НОВЫЙ СИГНАЛ: Отправляет данные для обновления графиков во время обучения
     update_plot_signal = QtCore.pyqtSignal(dict)
 
     def __init__(self, parent=None):
@@ -58,36 +57,25 @@ class Worker(QtCore.QObject):
 
         data = None
         delimiters = [';', ',', '\t']
+        encodings = ['utf-8', 'cp1251']
 
-        # Перебираем возможные разделители
+        # Перебираем возможные разделители и кодировки
         for delimiter in delimiters:
-            try:
-                data = pd.read_csv(file_path, delimiter=delimiter, encoding='utf-8')
-                if data.shape[1] > 1:
-                    self.update_status_signal.emit(
-                        f"✅ Файл '{os.path.basename(file_path)}' успешно загружен с разделителем '{delimiter}'.")
-                    break
-                else:
-                    self.update_status_signal.emit(
-                        f"⚠️ Файл загружен, но обнаружен только один столбец с разделителем '{delimiter}'. Пробуем другой разделитель...")
-                    data = None
-            except Exception:
-                try:  # Пробуем cp1251
-                    data = pd.read_csv(file_path, delimiter=delimiter, encoding='cp1251')
+            for encoding in encodings:
+                try:
+                    data = pd.read_csv(file_path, delimiter=delimiter, encoding=encoding)
                     if data.shape[1] > 1:
                         self.update_status_signal.emit(
-                            f"✅ Файл '{os.path.basename(file_path)}' успешно загружен с разделителем '{delimiter}' и кодировкой cp1251.")
-                        break
-                    else:
-                        data = None
+                            f"✅ Файл '{os.path.basename(file_path)}' успешно загружен с разделителем '{delimiter}' и кодировкой '{encoding}'.")
+                        break  # Выходим из внутреннего цикла, если все хорошо
                 except Exception:
-                    self.update_status_signal.emit(
-                        f"❌ Ошибка при загрузке с разделителем '{delimiter}'. Пробуем другой...")
                     data = None
+            if data is not None and data.shape[1] > 1:
+                break  # Выходим из внешнего цикла
 
         if data is None or data.shape[1] <= 1:
             raise ValueError(
-                "Не удалось загрузить файл, так как ни один из предполагаемых разделителей (';', ',', '\\t') не подошел или файл содержит только один столбец.")
+                "Не удалось загрузить файл. Пожалуйста, убедитесь, что файл CSV не пуст, содержит более одного столбца и использует стандартные разделители (';', ',', '\\t').")
 
         data.columns = data.columns.str.strip()
         self.update_status_signal.emit(f"📝 Столбцы в файле: {', '.join(data.columns)}")
@@ -149,7 +137,9 @@ class Worker(QtCore.QObject):
 
         self.is_learning_running = True
         self.update_status_signal.emit("▶️ Начинаем обучение модели...")
-        self.epoch_data = {'loss': [], 'val_loss': []}
+        self.epoch_x = []
+        self.train_loss_y = []
+        self.val_loss_y = []
 
         try:
             scaled_data, self.scaler = self.load_and_preprocess_data(file_path, self.scaler, fit_scaler=True)
@@ -173,8 +163,6 @@ class Worker(QtCore.QObject):
             threshold = np.percentile(reconstruction_errors, 95)
 
             results = {
-                'loss': history.history['loss'],
-                'val_loss': history.history['val_loss'],
                 'threshold': threshold
             }
 

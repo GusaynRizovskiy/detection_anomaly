@@ -8,8 +8,10 @@ import pandas as pd
 import numpy as np
 import pyqtgraph as pg
 import requests
-from PyQt5 import QtWidgets, QtCore
+import logging
+from PyQt5 import QtWidgets, QtCore, QtGui
 from PyQt5.QtWidgets import QFileDialog, QMessageBox, QDoubleSpinBox
+from PyQt5.QtGui import QPalette, QBrush, QPixmap
 from sklearn.preprocessing import MinMaxScaler
 from tensorflow.keras.models import Model, load_model
 from tensorflow.keras.layers import Input, Conv1D, LSTM, RepeatVector
@@ -20,6 +22,8 @@ os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 # Импортируем класс UI-формы из модуля form_of_network
 from form_of_network import Ui_Dialog
 
+# Настройка логирования
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 # === Функции для работы с данными и моделью ===
 def load_and_preprocess_data(file_path, scaler, fit_scaler=True):
@@ -76,11 +80,11 @@ def send_to_siem(json_data):
     try:
         response = requests.post(url, headers=headers, data=json.dumps(json_data))
         if response.status_code == 200:
-            print(f"Аномалия успешно отправлена: sequence_index={json_data.get('sequence_index')}")
+            logging.info(f"Аномалия успешно отправлена: sequence_index={json_data.get('sequence_index')}")
         else:
-            print(f"Ошибка отправки в SIEM: {response.status_code} - {response.text}")
+            logging.error(f"Ошибка отправки в SIEM: {response.status_code} - {response.text}")
     except requests.exceptions.RequestException as e:
-        print(f"Ошибка при отправке в SIEM: {e}")
+        logging.error(f"Ошибка при отправке в SIEM: {e}", exc_info=True)
 
 
 # --- Класс основного приложения ---
@@ -96,6 +100,23 @@ class AutoencoderApp(QtWidgets.QDialog, Ui_Dialog):
         self.spinBox_porog_anomaly_value.setRange(0, 1)
         self.verticalLayout.insertWidget(3, self.spinBox_porog_anomaly_value)
         self.findChild(QtWidgets.QSpinBox, "spinBox_porog_anomaly_value").deleteLater()
+
+        # === Загрузка фонового изображения с обработкой ошибок ===
+        background_image_path = "fon/pucture_fon2.jpg"
+        try:
+            if os.path.exists(background_image_path):
+                palette = QPalette()
+                pixmap = QPixmap(background_image_path)
+                palette.setBrush(QPalette.Background, QBrush(pixmap.scaled(self.size(), QtCore.Qt.IgnoreAspectRatio)))
+                self.setPalette(palette)
+                self.setAutoFillBackground(True)
+                logging.info(f"Фоновое изображение успешно загружено: {background_image_path}")
+            else:
+                logging.warning(
+                    f"Фоновое изображение не найдено по пути: {background_image_path}. Фон не будет установлен.")
+        except Exception as e:
+            logging.error(f"Ошибка при загрузке фонового изображения '{background_image_path}': {e}", exc_info=True)
+            QMessageBox.critical(self, "Ошибка загрузки фона", f"Не удалось загрузить фоновое изображение: {e}")
 
         # Инициализация переменных
         self.autoencoder = None

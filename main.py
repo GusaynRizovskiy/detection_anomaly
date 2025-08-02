@@ -1,6 +1,8 @@
 # -*- coding: utf-8 -*-
 
 import os
+os.environ['TF_ENABLE_ONEDNN_OPTS'] = '0'
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 import sys
 import json
 from datetime import datetime
@@ -15,11 +17,6 @@ from PyQt5.QtGui import QPalette, QBrush, QPixmap
 from sklearn.preprocessing import MinMaxScaler
 from tensorflow.keras.models import Model, load_model
 from tensorflow.keras.layers import Input, Conv1D, LSTM, RepeatVector
-
-# Эти строки нужно разместить как можно раньше,
-# чтобы они вступили в силу до первого импорта TensorFlow.
-os.environ['TF_ENABLE_ONEDNN_OPTS'] = '0'
-os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 
 # Импортируем класс UI-формы из модуля form_of_network
 from form_of_network import Ui_Dialog
@@ -105,7 +102,7 @@ class AutoencoderApp(QtWidgets.QDialog, Ui_Dialog):
         self.findChild(QtWidgets.QSpinBox, "spinBox_porog_anomaly_value").deleteLater()
 
         # === Загрузка фонового изображения с обработкой ошибок ===
-        background_image_path = "fon/bg.jpg"  # Укажите здесь имя вашего файла
+        background_image_path = "fon/picture_fon2.jpg"  # Укажите здесь имя вашего файла
         try:
             if os.path.exists(background_image_path):
                 palette = QPalette()

@@ -1,9 +1,6 @@
 # -*- coding: utf-8 -*-
 
 import os
-
-os.environ['TF_ENABLE_ONEDNN_OPTS'] = '0'
-os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 import sys
 import json
 from datetime import datetime
@@ -17,17 +14,12 @@ from PyQt5.QtWidgets import QFileDialog, QMessageBox, QDoubleSpinBox
 from PyQt5.QtGui import QPalette, QBrush, QPixmap
 from tensorflow.keras.models import load_model
 import pickle
-from tensorflow.keras.models import load_model
-from tensorflow.keras.layers import Input, Conv1D, LSTM, RepeatVector
 from tensorflow.keras.metrics import MeanSquaredError
 from tensorflow.keras.losses import MeanSquaredError as mse_loss
 
 # Импортируем класс UI-формы из модуля form_of_network и новый класс Worker
 from form_of_network import Ui_Dialog
 from worker import Worker  # Импортируем новый класс
-
-# Настройка логирования
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 
 # --- Класс основного приложения ---
@@ -67,6 +59,22 @@ class AutoencoderApp(QtWidgets.QDialog, Ui_Dialog):
         self.spinBox_timestep_value.setValue(10)
         self.spinBox_porog_anomaly_value.setValue(0.001)
 
+        # === Настройка логирования ===
+        if not os.path.exists('log'):
+            os.makedirs('log')
+        log_file_name = f"log/app_{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.log"
+        logging.basicConfig(
+            level=logging.INFO,
+            format='%(asctime)s - %(levelname)s - %(message)s',
+            handlers=[
+                logging.FileHandler(log_file_name, encoding='utf-8'),
+                logging.StreamHandler(sys.stdout)
+            ]
+        )
+        # Отключаем логирование Tensorflow, чтобы не засорять логи
+        os.environ['TF_ENABLE_ONEDNN_OPTS'] = '0'
+        os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
+
         # === Настройка рабочего потока ===
         self.worker_thread = QtCore.QThread()
         self.worker = Worker()
@@ -105,6 +113,7 @@ class AutoencoderApp(QtWidgets.QDialog, Ui_Dialog):
 
         # Вывод приветственного сообщения
         self.update_status("Программа запущена. Загрузите файлы для обучения или тестирования.")
+        logging.info("Приложение запущено и готово к работе.")
 
         # Начальное состояние кнопок
         self.set_ui_state_initial()
@@ -113,18 +122,18 @@ class AutoencoderApp(QtWidgets.QDialog, Ui_Dialog):
         """Устанавливает начальное состояние кнопок."""
         self.pushButton_load_file_for_learning.setEnabled(True)
         self.pushButton_learn_model.setEnabled(True)
-        self.pushButton_save_model.setEnabled(False)  # Сначала нет обученной модели
+        self.pushButton_save_model.setEnabled(False)
         self.pushButton_load_model.setEnabled(True)
-        self.pushButton_load_test_file.setEnabled(False)  # Нельзя тестировать без модели
-        self.pushButton_test_model.setEnabled(False)  # Нельзя тестировать без модели
+        self.pushButton_load_test_file.setEnabled(False)
+        self.pushButton_test_model.setEnabled(False)
         self.pushButton_vvod_data.setEnabled(True)
 
     def set_ui_state_after_learning_or_loading(self):
         """Устанавливает состояние кнопок после обучения или загрузки модели."""
-        self.pushButton_load_file_for_learning.setEnabled(False)  # Нельзя обучать, пока не сброшены настройки
+        self.pushButton_load_file_for_learning.setEnabled(False)
         self.pushButton_learn_model.setEnabled(False)
         self.pushButton_save_model.setEnabled(True)
-        self.pushButton_load_model.setEnabled(False)  # Нельзя загружать, пока уже есть модель
+        self.pushButton_load_model.setEnabled(False)
         self.pushButton_load_test_file.setEnabled(True)
         self.pushButton_test_model.setEnabled(True)
         self.pushButton_vvod_data.setEnabled(False)
@@ -298,15 +307,12 @@ class AutoencoderApp(QtWidgets.QDialog, Ui_Dialog):
                     QMessageBox.critical(self, "Ошибка загрузки", "Файл модели не найден по указанному пути.")
                     return
 
-                # Попытка загрузки модели с указанием custom_objects
-                # Здесь мы явно говорим Keras, как найти 'mse' и 'MeanSquaredError'
                 custom_objects = {
                     'mse': mse_loss,
                     'MeanSquaredError': MeanSquaredError
                 }
                 self.worker.autoencoder = load_model(file_path, custom_objects=custom_objects)
 
-                # Попытка загрузки скейлера
                 scaler_path = file_path.replace('.h5', '_scaler.pkl')
                 if os.path.exists(scaler_path):
                     with open(scaler_path, 'rb') as f:

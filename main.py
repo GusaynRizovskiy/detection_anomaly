@@ -80,11 +80,17 @@ class AutoencoderApp(QtWidgets.QDialog, Ui_Dialog):
         self.worker.learning_finished.connect(self.handle_learning_results)
         self.worker.testing_finished.connect(self.handle_testing_results)
         self.worker.update_status_signal.connect(self.update_status)
+        # НОВОЕ ПОДКЛЮЧЕНИЕ: Сигнал для обновления графиков во время обучения
+        self.worker.update_plot_signal.connect(self.update_learning_plot)
+
 
         self.worker_thread.start()
 
         # Инициализация графиков
         self.setup_plots()
+        self.epoch_x = []
+        self.train_loss_y = []
+        self.val_loss_y = []
 
         # Привязка кнопок к функциям
         self.pushButton_load_file_for_learning.clicked.connect(self.load_learning_file)
@@ -178,6 +184,17 @@ class AutoencoderApp(QtWidgets.QDialog, Ui_Dialog):
         self.curve_true_anomalies = self.plot_anomaly_comparison.plot(pen='b', name='Истинные аномалии')
         self.curve_predicted_anomalies = self.plot_anomaly_comparison.plot(pen='r', name='Предсказания модели')
 
+    # НОВЫЙ СЛОТ: Обновление графиков во время обучения
+    @QtCore.pyqtSlot(dict)
+    def update_learning_plot(self, epoch_logs):
+        self.epoch_x.append(epoch_logs['epoch'])
+        self.train_loss_y.append(epoch_logs['loss'])
+        self.val_loss_y.append(epoch_logs['val_loss'])
+        self.curve_train_loss.setData(self.epoch_x, self.train_loss_y)
+        self.curve_val_loss.setData(self.epoch_x, self.val_loss_y)
+        self.update_status(f"Эпоха {epoch_logs['epoch']}: Loss = {epoch_logs['loss']:.4f}, Val Loss = {epoch_logs['val_loss']:.4f}")
+
+
     # --- Функции для работы с файлами ---
     def load_learning_file(self):
         """Загружает файл для обучения."""
@@ -218,13 +235,16 @@ class AutoencoderApp(QtWidgets.QDialog, Ui_Dialog):
         epochs = self.spinBox_epochs_value.value()
         batch_size = self.spinBox_batch_size_value.value()
 
-        # Проверяем, что параметры не равны нулю перед началом обучения
         if time_step == 0 or epochs == 0 or batch_size == 0:
             QMessageBox.warning(self, "Ошибка",
                                 "Значения 'Временной шаг', 'Количество эпох' и 'Размер батча' не могут быть равны 0. Пожалуйста, введите корректные значения.")
             return
 
-        # ИСПРАВЛЕНИЕ: Используем наш новый сигнал для вызова слота в рабочем потоке
+        # Перед началом обучения очищаем данные для графика
+        self.epoch_x.clear()
+        self.train_loss_y.clear()
+        self.val_loss_y.clear()
+
         self.start_learning_signal.emit(self.learning_file_path, time_step, epochs, batch_size)
 
     def handle_learning_results(self, results):
@@ -232,9 +252,6 @@ class AutoencoderApp(QtWidgets.QDialog, Ui_Dialog):
         self.threshold = results['threshold']
         self.spinBox_porog_anomaly_value.setValue(self.threshold)
         self.update_status(f"Автоматически рассчитанный порог аномалии: {self.threshold:.4f}")
-
-        self.curve_train_loss.setData(results['loss'])
-        self.curve_val_loss.setData(results['val_loss'])
 
     def save_model(self):
         """Сохраняет обученную модель и scaler."""
@@ -276,7 +293,6 @@ class AutoencoderApp(QtWidgets.QDialog, Ui_Dialog):
         time_step = self.spinBox_timestep_value.value()
         threshold = self.spinBox_porog_anomaly_value.value()
 
-        # Проверяем, что параметры не равны нулю перед началом тестирования
         if time_step == 0:
             QMessageBox.warning(self, "Ошибка",
                                 "Значение 'Временной шаг' не может быть равно 0. Пожалуйста, введите корректное значение.")
@@ -286,7 +302,6 @@ class AutoencoderApp(QtWidgets.QDialog, Ui_Dialog):
             QMessageBox.warning(self, "Предупреждение",
                                 "Порог аномалии равен 0. Используйте рассчитанный порог или введите вручную.")
 
-        # ИСПРАВЛЕНИЕ: Используем наш новый сигнал для вызова слота в рабочем потоке
         self.start_testing_signal.emit(self.test_file_path, time_step, threshold)
 
     def handle_testing_results(self, results):

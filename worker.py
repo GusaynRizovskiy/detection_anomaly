@@ -9,9 +9,26 @@ from tensorflow.keras.models import Model
 from tensorflow.keras.layers import Input, Conv1D, LSTM, RepeatVector
 from sklearn.preprocessing import MinMaxScaler
 import pickle
+from tensorflow.keras.callbacks import Callback
 
 # Настройка логирования для рабочего потока
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+
+
+class PlotCallback(Callback):
+    """
+    Класс обратного вызова для отправки данных о loss на каждой эпохе.
+    """
+
+    def __init__(self, signal):
+        super().__init__()
+        self.signal = signal
+
+    def on_epoch_end(self, epoch, logs=None):
+        loss = logs.get('loss')
+        val_loss = logs.get('val_loss')
+        if loss is not None and val_loss is not None:
+            self.signal.emit({'epoch': epoch, 'loss': loss, 'val_loss': val_loss})
 
 
 class Worker(QtCore.QObject):
@@ -20,10 +37,11 @@ class Worker(QtCore.QObject):
     Наследуется от QObject для использования сигналов.
     """
 
-    # Сигналы для общения с основным потоком GUI
-    learning_finished = QtCore.pyqtSignal(dict)  # Отправляет результаты обучения
-    testing_finished = QtCore.pyqtSignal(dict)  # Отправляет результаты тестирования
-    update_status_signal = QtCore.pyqtSignal(str)  # Отправляет сообщения для статусной строки
+    learning_finished = QtCore.pyqtSignal(dict)
+    testing_finished = QtCore.pyqtSignal(dict)
+    update_status_signal = QtCore.pyqtSignal(str)
+    # НОВЫЙ СИГНАЛ: Отправляет данные для обновления графиков во время обучения
+    update_plot_signal = QtCore.pyqtSignal(dict)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -31,6 +49,7 @@ class Worker(QtCore.QObject):
         self.scaler = None
         self.is_learning_running = False
         self.is_testing_running = False
+        self.epoch_data = {'loss': [], 'val_loss': []}
 
     def load_and_preprocess_data(self, file_path, scaler, fit_scaler=True):
         """Загрузка, очистка и нормализация данных с обработкой кодировки и разделителей."""
@@ -38,52 +57,52 @@ class Worker(QtCore.QObject):
             raise ValueError("Путь к файлу не указан.")
 
         data = None
-        # Список возможных разделителей
         delimiters = [';', ',', '\t']
 
         # Перебираем возможные разделители
         for delimiter in delimiters:
             try:
-                # Попытка чтения в кодировке utf-8
                 data = pd.read_csv(file_path, delimiter=delimiter, encoding='utf-8')
-                # Проверяем, удалось ли разбить на несколько столбцов
                 if data.shape[1] > 1:
                     self.update_status_signal.emit(
                         f"✅ Файл '{os.path.basename(file_path)}' успешно загружен с разделителем '{delimiter}'.")
-                    break  # Выходим из цикла, если все хорошо
+                    break
                 else:
                     self.update_status_signal.emit(
                         f"⚠️ Файл загружен, но обнаружен только один столбец с разделителем '{delimiter}'. Пробуем другой разделитель...")
                     data = None
             except Exception:
-                self.update_status_signal.emit(f"❌ Ошибка при загрузке с разделителем '{delimiter}'. Пробуем другой...")
-                data = None
+                try:  # Пробуем cp1251
+                    data = pd.read_csv(file_path, delimiter=delimiter, encoding='cp1251')
+                    if data.shape[1] > 1:
+                        self.update_status_signal.emit(
+                            f"✅ Файл '{os.path.basename(file_path)}' успешно загружен с разделителем '{delimiter}' и кодировкой cp1251.")
+                        break
+                    else:
+                        data = None
+                except Exception:
+                    self.update_status_signal.emit(
+                        f"❌ Ошибка при загрузке с разделителем '{delimiter}'. Пробуем другой...")
+                    data = None
 
-        if data is None:
-            # Если ни один из разделителей не сработал
+        if data is None or data.shape[1] <= 1:
             raise ValueError(
-                "Не удалось загрузить файл, так как ни один из предполагаемых разделителей (';', ',', '\\t') не подошел.")
+                "Не удалось загрузить файл, так как ни один из предполагаемых разделителей (';', ',', '\\t') не подошел или файл содержит только один столбец.")
 
-        # Убираем пробелы в названиях столбцов
         data.columns = data.columns.str.strip()
         self.update_status_signal.emit(f"📝 Столбцы в файле: {', '.join(data.columns)}")
 
-        # Убедимся, что DataFrame не пустой после загрузки
         if data.empty:
             raise ValueError("Загруженный CSV-файл пуст или не содержит данных.")
 
-        # Удаление столбца с временем, если он существует
         if 'Время захвата пакетов' in data.columns:
             data.drop(columns=['Время захвата пакетов'], inplace=True)
             self.update_status_signal.emit("🗑️ Столбец 'Время захвата пакетов' удален.")
 
-        # Заменяем запятые на точки и преобразуем в числовой формат
-        # Это важно, так как в некоторых CSV-файлах числа могут быть записаны через запятую
         data = data.replace(',', '.', regex=True)
         data = data.apply(pd.to_numeric, errors='coerce')
         self.update_status_signal.emit(f"🔢 Преобразовано {data.shape[1]} столбцов в числовой формат.")
 
-        # Удаляем строки с пропущенными значениями
         rows_before = len(data)
         data = data.dropna()
         rows_after = len(data)
@@ -93,7 +112,6 @@ class Worker(QtCore.QObject):
         if data.empty:
             raise ValueError("В DataFrame не осталось данных после очистки. Проверьте формат данных в файле.")
 
-        # Масштабирование данных
         if fit_scaler or scaler is None:
             new_scaler = MinMaxScaler()
             scaled_data = new_scaler.fit_transform(data)
@@ -105,7 +123,6 @@ class Worker(QtCore.QObject):
             return scaled_data, scaler
 
     def create_dataset(self, data, time_step):
-        """Создание временных рядов."""
         X = []
         for i in range(len(data) - time_step):
             a = data[i:(i + time_step), :]
@@ -113,7 +130,6 @@ class Worker(QtCore.QObject):
         return np.array(X)
 
     def build_cnn_lstm_autoencoder(self, input_shape):
-        """Создание архитектуры автоэнкодера."""
         input_layer = Input(shape=input_shape)
         conv_encoder = Conv1D(32, kernel_size=3, activation='relu', padding='same')(input_layer)
         lstm_encoder = LSTM(50, activation='relu', return_sequences=False)(conv_encoder)
@@ -127,26 +143,29 @@ class Worker(QtCore.QObject):
 
     @QtCore.pyqtSlot(str, int, int, int)
     def start_learning(self, file_path, time_step, epochs, batch_size):
-        """Слот для запуска обучения модели."""
         if self.is_learning_running:
             self.update_status_signal.emit("⚠️ Обучение уже запущено.")
             return
 
         self.is_learning_running = True
         self.update_status_signal.emit("▶️ Начинаем обучение модели...")
+        self.epoch_data = {'loss': [], 'val_loss': []}
+
         try:
             scaled_data, self.scaler = self.load_and_preprocess_data(file_path, self.scaler, fit_scaler=True)
             X_train = self.create_dataset(scaled_data, time_step)
 
-            # Проверка, что X_train не пустой
             if X_train.size == 0:
                 raise ValueError("Недостаточно данных для создания временных окон. Уменьшите 'Временной шаг'.")
 
             X_train = X_train.reshape(X_train.shape[0], time_step, scaled_data.shape[1])
             self.autoencoder = self.build_cnn_lstm_autoencoder((X_train.shape[1], X_train.shape[2]))
 
+            plot_callback = PlotCallback(self.update_plot_signal)
+
             history = self.autoencoder.fit(X_train, X_train, epochs=epochs, batch_size=batch_size, validation_split=0.2,
-                                           verbose=0)
+                                           verbose=0, callbacks=[plot_callback])
+
             self.update_status_signal.emit("🧠 Модель обучена. Расчет порога аномалий...")
 
             reconstruction_errors = np.mean(np.power(X_train - self.autoencoder.predict(X_train, verbose=0), 2),
@@ -169,7 +188,6 @@ class Worker(QtCore.QObject):
 
     @QtCore.pyqtSlot(str, int, float)
     def start_testing(self, file_path, time_step, threshold):
-        """Слот для запуска тестирования модели."""
         if self.is_testing_running:
             self.update_status_signal.emit("⚠️ Тестирование уже запущено.")
             return
@@ -207,5 +225,4 @@ class Worker(QtCore.QObject):
             self.is_testing_running = False
 
     def stop(self):
-        """Метод для остановки потока, если это необходимо."""
         pass

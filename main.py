@@ -28,6 +28,10 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 
 # --- Класс основного приложения ---
 class AutoencoderApp(QtWidgets.QDialog, Ui_Dialog):
+    # Новые сигналы для запуска операций в рабочем потоке
+    start_learning_signal = QtCore.pyqtSignal(str, int, int, int)
+    start_testing_signal = QtCore.pyqtSignal(str, int, float)
+
     def __init__(self):
         super().__init__()
         self.setupUi(self)
@@ -68,6 +72,11 @@ class AutoencoderApp(QtWidgets.QDialog, Ui_Dialog):
         self.worker_thread.started.connect(lambda: logging.info("Рабочий поток запущен."))
         self.worker_thread.finished.connect(lambda: logging.info("Рабочий поток завершен."))
 
+        # Подключаем сигналы главного потока к слотам рабочего потока
+        self.start_learning_signal.connect(self.worker.start_learning)
+        self.start_testing_signal.connect(self.worker.start_testing)
+
+        # Подключаем сигналы рабочего потока к слотам главного потока
         self.worker.learning_finished.connect(self.handle_learning_results)
         self.worker.testing_finished.connect(self.handle_testing_results)
         self.worker.update_status_signal.connect(self.update_status)
@@ -84,9 +93,7 @@ class AutoencoderApp(QtWidgets.QDialog, Ui_Dialog):
         self.pushButton_load_model.clicked.connect(self.load_model)
         self.pushButton_load_test_file.clicked.connect(self.load_test_file)
         self.pushButton_test_model.clicked.connect(self.start_testing)
-        # !!! НОВАЯ СТРОКА: Подключаем новую кнопку !!!
         self.pushButton_vvod_data.clicked.connect(self.check_and_accept_parameters)
-        # self.pushButton_parametr_input.clicked.connect(self.accept_parameters) # Удалена несуществующая кнопка
 
         # Вывод приветственного сообщения
         self.update_status("Программа запущена. Загрузите файлы для обучения или тестирования.")
@@ -217,8 +224,8 @@ class AutoencoderApp(QtWidgets.QDialog, Ui_Dialog):
                                 "Значения 'Временной шаг', 'Количество эпох' и 'Размер батча' не могут быть равны 0. Пожалуйста, введите корректные значения.")
             return
 
-        # Отправляем параметры в рабочий поток
-        self.worker.start_learning.emit(self.learning_file_path, time_step, epochs, batch_size)
+        # ИСПРАВЛЕНИЕ: Используем наш новый сигнал для вызова слота в рабочем потоке
+        self.start_learning_signal.emit(self.learning_file_path, time_step, epochs, batch_size)
 
     def handle_learning_results(self, results):
         """Слот для обработки результатов обучения из рабочего потока."""
@@ -279,7 +286,8 @@ class AutoencoderApp(QtWidgets.QDialog, Ui_Dialog):
             QMessageBox.warning(self, "Предупреждение",
                                 "Порог аномалии равен 0. Используйте рассчитанный порог или введите вручную.")
 
-        self.worker.start_testing.emit(self.test_file_path, time_step, threshold)
+        # ИСПРАВЛЕНИЕ: Используем наш новый сигнал для вызова слота в рабочем потоке
+        self.start_testing_signal.emit(self.test_file_path, time_step, threshold)
 
     def handle_testing_results(self, results):
         """Слот для обработки результатов тестирования из рабочего потока."""

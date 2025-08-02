@@ -1,12 +1,14 @@
 # -*- coding: utf-8 -*-
-from PyQt5 import QtCore
-import numpy as np
+import os
+import sys
 import pandas as pd
+import numpy as np
+from PyQt5 import QtCore
+import logging
 from tensorflow.keras.models import Model
 from tensorflow.keras.layers import Input, Conv1D, LSTM, RepeatVector
 from sklearn.preprocessing import MinMaxScaler
 import pickle
-import logging
 
 # Настройка логирования для рабочего потока
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -36,28 +38,57 @@ class Worker(QtCore.QObject):
             raise ValueError("Путь к файлу не указан.")
 
         try:
+            # 1. Попытка чтения в кодировке utf-8
             data = pd.read_csv(file_path, delimiter=';', encoding='utf-8')
         except UnicodeDecodeError:
             try:
+                # 2. В случае ошибки, пробуем кодировку cp1251
                 data = pd.read_csv(file_path, delimiter=';', encoding='cp1251')
             except UnicodeDecodeError:
-                raise ValueError("Не удалось определить кодировку файла. Попробуйте сохранить его в формате UTF-8.")
+                # 3. Если и это не помогло, выводим ошибку
+                raise ValueError(
+                    "Не удалось определить кодировку файла. Попробуйте сохранить его в формате UTF-8 или CP1251.")
 
+        self.update_status_signal.emit(f"✅ Файл '{os.path.basename(file_path)}' успешно загружен.")
+
+        # Убираем пробелы в названиях столбцов
         data.columns = data.columns.str.strip()
+        self.update_status_signal.emit(f"📝 Столбцы в файле: {', '.join(data.columns)}")
 
+        # Убедимся, что DataFrame не пустой после загрузки
+        if data.empty:
+            raise ValueError("Загруженный CSV-файл пуст или не содержит данных.")
+
+        # Удаление столбца с временем, если он существует
         if 'Время захвата пакетов' in data.columns:
             data.drop(columns=['Время захвата пакетов'], inplace=True)
+            self.update_status_signal.emit("🗑️ Столбец 'Время захвата пакетов' удален.")
 
+        # Заменяем запятые на точки и преобразуем в числовой формат
         data = data.replace(',', '.', regex=True)
         data = data.apply(pd.to_numeric, errors='coerce')
-        data = data.dropna()
+        self.update_status_signal.emit(f"🔢 Преобразовано {data.shape[1]} столбцов в числовой формат.")
 
+        # Удаляем строки с пропущенными значениями
+        rows_before = len(data)
+        data = data.dropna()
+        rows_after = len(data)
+        if rows_before - rows_after > 0:
+            self.update_status_signal.emit(f"❌ Удалено {rows_before - rows_after} строк с некорректными данными.")
+
+        # !!! ГЛАВНОЕ ИСПРАВЛЕНИЕ: ПРОВЕРКА ПУСТОГО DATAFRAME !!!
+        if data.empty:
+            raise ValueError("В DataFrame не осталось данных после очистки. Проверьте формат данных в файле.")
+
+        # Масштабирование данных
         if fit_scaler or scaler is None:
             new_scaler = MinMaxScaler()
             scaled_data = new_scaler.fit_transform(data)
+            self.update_status_signal.emit("📊 Данные масштабированы новым MinMaxScaler.")
             return scaled_data, new_scaler
         else:
             scaled_data = scaler.transform(data)
+            self.update_status_signal.emit("📊 Данные масштабированы существующим MinMaxScaler.")
             return scaled_data, scaler
 
     def create_dataset(self, data, time_step):
@@ -93,13 +124,20 @@ class Worker(QtCore.QObject):
         try:
             scaled_data, self.scaler = self.load_and_preprocess_data(file_path, self.scaler, fit_scaler=True)
             X_train = self.create_dataset(scaled_data, time_step)
+
+            # Проверка, что X_train не пустой
+            if X_train.size == 0:
+                raise ValueError("Недостаточно данных для создания временных окон. Уменьшите 'Временной шаг'.")
+
             X_train = X_train.reshape(X_train.shape[0], time_step, scaled_data.shape[1])
             self.autoencoder = self.build_cnn_lstm_autoencoder((X_train.shape[1], X_train.shape[2]))
 
             history = self.autoencoder.fit(X_train, X_train, epochs=epochs, batch_size=batch_size, validation_split=0.2,
                                            verbose=0)
+            self.update_status_signal.emit("🧠 Модель обучена. Расчет порога аномалий...")
 
-            reconstruction_errors = np.mean(np.power(X_train - self.autoencoder.predict(X_train), 2), axis=(1, 2))
+            reconstruction_errors = np.mean(np.power(X_train - self.autoencoder.predict(X_train, verbose=0), 2),
+                                            axis=(1, 2))
             threshold = np.percentile(reconstruction_errors, 95)
 
             results = {
@@ -109,7 +147,7 @@ class Worker(QtCore.QObject):
             }
 
             self.learning_finished.emit(results)
-            self.update_status_signal.emit("✅ Модель успешно обучена!")
+            self.update_status_signal.emit("✅ Обучение завершено!")
         except Exception as e:
             self.update_status_signal.emit(f"❌ Произошла ошибка во время обучения: {e}")
             logging.error("Ошибка в рабочем потоке во время обучения", exc_info=True)
@@ -131,9 +169,15 @@ class Worker(QtCore.QObject):
         try:
             scaled_data, _ = self.load_and_preprocess_data(file_path, self.scaler, fit_scaler=False)
             X_new = self.create_dataset(scaled_data, time_step)
+
+            if X_new.size == 0:
+                raise ValueError("Недостаточно данных для создания временных окон. Уменьшите 'Временной шаг'.")
+
             X_new = X_new.reshape(X_new.shape[0], time_step, scaled_data.shape[1])
 
-            reconstruction_errors = np.mean(np.power(X_new - self.autoencoder.predict(X_new), 2), axis=(1, 2))
+            self.update_status_signal.emit("🔍 Выполняется предсказание на тестовых данных...")
+            reconstruction_errors = np.mean(np.power(X_new - self.autoencoder.predict(X_new, verbose=0), 2),
+                                            axis=(1, 2))
             anomalies = np.where(reconstruction_errors > threshold)[0]
 
             results = {

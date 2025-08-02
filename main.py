@@ -53,6 +53,12 @@ class AutoencoderApp(QtWidgets.QDialog, Ui_Dialog):
         self.learning_file_path = None
         self.test_file_path = None
 
+        # === Установка значений по умолчанию для spinBox ===
+        self.spinBox_epochs_value.setValue(100)
+        self.spinBox_batch_size_value.setValue(32)
+        self.spinBox_timestep_value.setValue(10)
+        self.spinBox_porog_anomaly_value.setValue(0.001)
+
         # === Настройка рабочего потока ===
         self.worker_thread = QtCore.QThread()
         self.worker = Worker()
@@ -78,6 +84,9 @@ class AutoencoderApp(QtWidgets.QDialog, Ui_Dialog):
         self.pushButton_load_model.clicked.connect(self.load_model)
         self.pushButton_load_test_file.clicked.connect(self.load_test_file)
         self.pushButton_test_model.clicked.connect(self.start_testing)
+        # !!! НОВАЯ СТРОКА: Подключаем новую кнопку !!!
+        self.pushButton_vvod_data.clicked.connect(self.check_and_accept_parameters)
+        # self.pushButton_parametr_input.clicked.connect(self.accept_parameters) # Удалена несуществующая кнопка
 
         # Вывод приветственного сообщения
         self.update_status("Программа запущена. Загрузите файлы для обучения или тестирования.")
@@ -177,23 +186,42 @@ class AutoencoderApp(QtWidgets.QDialog, Ui_Dialog):
             self.test_file_path = file_path
             self.update_status(f"Файл для тестирования выбран: {file_path}")
 
+    def check_and_accept_parameters(self):
+        """Проверяет заполненность полей и принимает параметры."""
+        time_step = self.spinBox_timestep_value.value()
+        epochs = self.spinBox_epochs_value.value()
+        batch_size = self.spinBox_batch_size_value.value()
+        threshold = self.spinBox_porog_anomaly_value.value()
+
+        if time_step == 0 or epochs == 0 or batch_size == 0:
+            QMessageBox.warning(self, "Ошибка ввода",
+                                "Значения 'Временной шаг', 'Количество эпох' и 'Размер батча' не могут быть равны 0.")
+        else:
+            self.update_status("✅ Параметры успешно введены и приняты.")
+            QMessageBox.information(self, "Успешный ввод", "Параметры обучения и тестирования приняты.")
+
     # --- Функции-слоты для управления рабочим потоком ---
     def start_learning(self):
+        """Запускает процесс обучения с проверкой параметров."""
         if not self.learning_file_path:
-            self.update_status("⚠️ Ошибка: Сначала загрузите файл для обучения.")
+            QMessageBox.warning(self, "Ошибка", "Пожалуйста, сначала выберите файл для обучения.")
             return
 
         time_step = self.spinBox_timestep_value.value()
         epochs = self.spinBox_epochs_value.value()
         batch_size = self.spinBox_batch_size_value.value()
 
+        # Проверяем, что параметры не равны нулю перед началом обучения
+        if time_step == 0 or epochs == 0 or batch_size == 0:
+            QMessageBox.warning(self, "Ошибка",
+                                "Значения 'Временной шаг', 'Количество эпох' и 'Размер батча' не могут быть равны 0. Пожалуйста, введите корректные значения.")
+            return
+
+        # Отправляем параметры в рабочий поток
         self.worker.start_learning.emit(self.learning_file_path, time_step, epochs, batch_size)
 
     def handle_learning_results(self, results):
         """Слот для обработки результатов обучения из рабочего потока."""
-        self.worker.autoencoder = self.worker.autoencoder  # Обновляем модель в главном потоке
-        self.worker.scaler = self.worker.scaler  # Обновляем скейлер в главном потоке
-
         self.threshold = results['threshold']
         self.spinBox_porog_anomaly_value.setValue(self.threshold)
         self.update_status(f"Автоматически рассчитанный порог аномалии: {self.threshold:.4f}")
@@ -204,14 +232,17 @@ class AutoencoderApp(QtWidgets.QDialog, Ui_Dialog):
     def save_model(self):
         """Сохраняет обученную модель и scaler."""
         if self.worker.autoencoder is None or self.worker.scaler is None:
-            self.update_status("⚠️ Ошибка: Сначала обучите или загрузите модель.")
+            QMessageBox.warning(self, "Ошибка", "Сначала обучите или загрузите модель.")
             return
         file_path, _ = QFileDialog.getSaveFileName(self, "Сохранить модель", "", "HDF5 Files (*.h5)")
         if file_path:
-            self.worker.autoencoder.save(file_path)
-            with open(file_path.replace('.h5', '_scaler.pkl'), 'wb') as f:
-                pickle.dump(self.worker.scaler, f)
-            self.update_status(f"✅ Модель и скейлер успешно сохранены в: {file_path}")
+            try:
+                self.worker.autoencoder.save(file_path)
+                with open(file_path.replace('.h5', '_scaler.pkl'), 'wb') as f:
+                    pickle.dump(self.worker.scaler, f)
+                self.update_status(f"✅ Модель и скейлер успешно сохранены в: {file_path}")
+            except Exception as e:
+                QMessageBox.critical(self, "Ошибка сохранения", f"Не удалось сохранить модель: {e}")
 
     def load_model(self):
         """Загружает ранее обученную модель."""
@@ -224,18 +255,29 @@ class AutoencoderApp(QtWidgets.QDialog, Ui_Dialog):
                     self.worker.scaler = pickle.load(f)
                 self.update_status("✅ Скейлер для нормализации успешно загружен.")
             except Exception as e:
-                self.update_status(f"❌ Ошибка загрузки модели: {e}")
+                QMessageBox.critical(self, "Ошибка загрузки", f"Не удалось загрузить модель: {e}")
 
     def start_testing(self):
+        """Запускает процесс тестирования с проверкой параметров."""
         if self.worker.autoencoder is None:
-            self.update_status("⚠️ Ошибка: Сначала обучите или загрузите модель.")
+            QMessageBox.warning(self, "Ошибка", "Сначала обучите или загрузите модель.")
             return
         if not self.test_file_path:
-            self.update_status("⚠️ Ошибка: Загрузите файл для тестирования.")
+            QMessageBox.warning(self, "Ошибка", "Пожалуйста, сначала выберите файл для тестирования.")
             return
 
         time_step = self.spinBox_timestep_value.value()
         threshold = self.spinBox_porog_anomaly_value.value()
+
+        # Проверяем, что параметры не равны нулю перед началом тестирования
+        if time_step == 0:
+            QMessageBox.warning(self, "Ошибка",
+                                "Значение 'Временной шаг' не может быть равно 0. Пожалуйста, введите корректное значение.")
+            return
+
+        if threshold == 0:
+            QMessageBox.warning(self, "Предупреждение",
+                                "Порог аномалии равен 0. Используйте рассчитанный порог или введите вручную.")
 
         self.worker.start_testing.emit(self.test_file_path, time_step, threshold)
 

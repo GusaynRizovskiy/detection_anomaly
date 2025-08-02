@@ -31,11 +31,18 @@ class Worker(QtCore.QObject):
         self.is_testing_running = False
 
     def load_and_preprocess_data(self, file_path, scaler, fit_scaler=True):
-        """Загрузка, очистка и нормализация данных."""
+        """Загрузка, очистка и нормализация данных с обработкой кодировки."""
         if not file_path:
             raise ValueError("Путь к файлу не указан.")
 
-        data = pd.read_csv(file_path, delimiter=';', encoding='cp1251')
+        try:
+            data = pd.read_csv(file_path, delimiter=';', encoding='utf-8')
+        except UnicodeDecodeError:
+            try:
+                data = pd.read_csv(file_path, delimiter=';', encoding='cp1251')
+            except UnicodeDecodeError:
+                raise ValueError("Не удалось определить кодировку файла. Попробуйте сохранить его в формате UTF-8.")
+
         data.columns = data.columns.str.strip()
 
         if 'Время захвата пакетов' in data.columns:
@@ -144,6 +151,4 @@ class Worker(QtCore.QObject):
 
     def stop(self):
         """Метод для остановки потока, если это необходимо."""
-        # В этой реализации, поскольку операции не бесконечны, явная остановка не требуется,
-        # но этот метод может быть полезен для более сложных задач.
         pass

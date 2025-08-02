@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 
 import os
+
 os.environ['TF_ENABLE_ONEDNN_OPTS'] = '0'
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 import sys
@@ -17,6 +18,7 @@ from PyQt5.QtGui import QPalette, QBrush, QPixmap
 from sklearn.preprocessing import MinMaxScaler
 from tensorflow.keras.models import Model, load_model
 from tensorflow.keras.layers import Input, Conv1D, LSTM, RepeatVector
+import pickle
 
 # Импортируем класс UI-формы из модуля form_of_network
 from form_of_network import Ui_Dialog
@@ -98,25 +100,18 @@ class AutoencoderApp(QtWidgets.QDialog, Ui_Dialog):
         self.spinBox_porog_anomaly_value.setDecimals(4)
         self.spinBox_porog_anomaly_value.setSingleStep(0.001)
         self.spinBox_porog_anomaly_value.setRange(0, 1)
-        self.verticalLayout.insertWidget(3, self.spinBox_porog_anomaly_value)
-        self.findChild(QtWidgets.QSpinBox, "spinBox_porog_anomaly_value").deleteLater()
+        # Находим макет по имени, чтобы вставить виджет
+        layout_to_insert = self.findChild(QtWidgets.QVBoxLayout, "verticalLayout")
+        if layout_to_insert:
+            layout_to_insert.insertWidget(3, self.spinBox_porog_anomaly_value)
+        # Удаляем старый QSpinBox
+        old_spinbox = self.findChild(QtWidgets.QSpinBox, "spinBox_porog_anomaly_value")
+        if old_spinbox:
+            old_spinbox.deleteLater()
 
-        # === Загрузка фонового изображения с обработкой ошибок ===
-        background_image_path = "fon/picture_fon2.jpg"  # Укажите здесь имя вашего файла
-        try:
-            if os.path.exists(background_image_path):
-                palette = QPalette()
-                pixmap = QPixmap(background_image_path)
-                palette.setBrush(QPalette.Background, QBrush(pixmap.scaled(self.size(), QtCore.Qt.IgnoreAspectRatio)))
-                self.setPalette(palette)
-                self.setAutoFillBackground(True)
-                logging.info(f"Фоновое изображение успешно загружено: {background_image_path}")
-            else:
-                logging.warning(
-                    f"Фоновое изображение не найдено по пути: {background_image_path}. Фон не будет установлен.")
-        except Exception as e:
-            logging.error(f"Ошибка при загрузке фонового изображения '{background_image_path}': {e}", exc_info=True)
-            QMessageBox.critical(self, "Ошибка загрузки фона", f"Не удалось загрузить фоновое изображение: {e}")
+        # === Инициализация фонового изображения ===
+        self.background_image_path = "fon/picture_fon2.jpg"
+        self.update_background()
 
         # Инициализация переменных
         self.autoencoder = None
@@ -141,6 +136,38 @@ class AutoencoderApp(QtWidgets.QDialog, Ui_Dialog):
         # Вывод приветственного сообщения
         self.update_status("Программа запущена. Загрузите файлы для обучения или тестирования.")
 
+    # === Добавляем обработчик события изменения размера окна ===
+    def resizeEvent(self, event):
+        """Обработчик события изменения размера окна."""
+        self.update_background()
+        super().resizeEvent(event)
+
+    def update_background(self):
+        """Метод для установки и масштабирования фонового изображения."""
+        try:
+            if os.path.exists(self.background_image_path):
+                palette = QPalette()
+                pixmap = QPixmap(self.background_image_path)
+
+                # Масштабируем изображение под текущий размер окна,
+                # сохраняя пропорции и обрезая лишнее, если нужно.
+                scaled_pixmap = pixmap.scaled(self.size(),
+                                              QtCore.Qt.KeepAspectRatioByExpanding,
+                                              QtCore.Qt.SmoothTransformation)
+
+                brush = QBrush(scaled_pixmap)
+                palette.setBrush(QPalette.Background, brush)
+                self.setPalette(palette)
+                self.setAutoFillBackground(True)
+                logging.info(f"Фоновое изображение успешно обновлено и масштабировано.")
+            else:
+                logging.warning(
+                    f"Фоновое изображение не найдено по пути: {self.background_image_path}. Фон не будет установлен.")
+        except Exception as e:
+            logging.error(f"Ошибка при загрузке фонового изображения '{self.background_image_path}': {e}",
+                          exc_info=True)
+            QMessageBox.critical(self, "Ошибка загрузки фона", f"Не удалось загрузить фоновое изображение: {e}")
+
     # --- Функции для GUI ---
     def update_status(self, message):
         """Обновляет текстовое поле статуса."""
@@ -150,12 +177,9 @@ class AutoencoderApp(QtWidgets.QDialog, Ui_Dialog):
     def setup_plots(self):
         """Настраивает виджеты для графиков."""
 
-        # === Установка белого фона для всех графиков ===
-        # Используем pg.setConfigOption для установки глобальных параметров
-        pg.setConfigOption('background', 'w')  # 'w' - белый цвет
-        pg.setConfigOption('foreground', 'k')  # 'k' - черный цвет для текста и осей
+        pg.setConfigOption('background', 'w')
+        pg.setConfigOption('foreground', 'k')
 
-        # График ошибки обучения и валидации
         self.plot_loss = pg.PlotWidget()
         layout_loss = QtWidgets.QVBoxLayout(self.widget_plot_loss)
         layout_loss.addWidget(self.plot_loss)
@@ -165,7 +189,6 @@ class AutoencoderApp(QtWidgets.QDialog, Ui_Dialog):
         self.curve_train_loss = self.plot_loss.plot(pen='b', name='Обучение')
         self.curve_val_loss = self.plot_loss.plot(pen='r', name='Валидация')
 
-        # График ошибки реконструкции
         self.plot_reconstruction_error = pg.PlotWidget()
         layout_reconstruction = QtWidgets.QVBoxLayout(self.widget_plot_reconstruction_error)
         layout_reconstruction.addWidget(self.plot_reconstruction_error)
@@ -176,7 +199,6 @@ class AutoencoderApp(QtWidgets.QDialog, Ui_Dialog):
         self.threshold_line = pg.InfiniteLine(angle=0, movable=False, pen='r')
         self.plot_reconstruction_error.addItem(self.threshold_line)
 
-        # График сравнения аномалий
         self.plot_anomaly_comparison = pg.PlotWidget()
         layout_comparison = QtWidgets.QVBoxLayout(self.widget_plot_anomaly_comparison)
         layout_comparison.addWidget(self.plot_anomaly_comparison)
@@ -225,7 +247,6 @@ class AutoencoderApp(QtWidgets.QDialog, Ui_Dialog):
             history = self.autoencoder.fit(X_train, X_train, epochs=epochs, batch_size=batch_size, validation_split=0.2,
                                            verbose=0)
 
-            # Автоматический расчет порога
             reconstruction_errors = np.mean(np.power(X_train - self.autoencoder.predict(X_train), 2), axis=(1, 2))
             self.threshold = np.percentile(reconstruction_errors, 95)
             self.spinBox_porog_anomaly_value.setValue(self.threshold)
@@ -233,7 +254,6 @@ class AutoencoderApp(QtWidgets.QDialog, Ui_Dialog):
             self.update_status("✅ Модель успешно обучена!")
             self.update_status(f"Автоматически рассчитанный порог аномалии: {self.threshold:.4f}")
 
-            # Визуализация ошибки обучения
             self.curve_train_loss.setData(history.history['loss'])
             self.curve_val_loss.setData(history.history['val_loss'])
 
@@ -249,8 +269,6 @@ class AutoencoderApp(QtWidgets.QDialog, Ui_Dialog):
         file_path, _ = QFileDialog.getSaveFileName(self, "Сохранить модель", "", "HDF5 Files (*.h5)")
         if file_path:
             self.autoencoder.save(file_path)
-            # Сохраняем также scaler, так как он нужен для предобработки новых данных
-            import pickle
             with open(file_path.replace('.h5', '_scaler.pkl'), 'wb') as f:
                 pickle.dump(self.scaler, f)
             self.update_status(f"✅ Модель и скейлер успешно сохранены в: {file_path}")
@@ -262,8 +280,6 @@ class AutoencoderApp(QtWidgets.QDialog, Ui_Dialog):
             try:
                 self.autoencoder = load_model(file_path)
                 self.update_status(f"✅ Модель успешно загружена из: {file_path}")
-                # Загружаем также scaler
-                import pickle
                 with open(file_path.replace('.h5', '_scaler.pkl'), 'rb') as f:
                     self.scaler = pickle.load(f)
                 self.update_status("✅ Скейлер для нормализации успешно загружен.")
@@ -292,15 +308,12 @@ class AutoencoderApp(QtWidgets.QDialog, Ui_Dialog):
             X_new = create_dataset(scaled_data, time_step)
             X_new = X_new.reshape(X_new.shape[0], time_step, scaled_data.shape[1])
 
-            # Предсказание и расчет ошибок
             reconstruction_errors = np.mean(np.power(X_new - self.autoencoder.predict(X_new), 2), axis=(1, 2))
             anomalies = np.where(reconstruction_errors > threshold)[0]
 
-            # Визуализация ошибок
             self.curve_reconstruction_error.setData(reconstruction_errors)
             self.threshold_line.setPos(threshold)
 
-            # Визуализация аномалий (просто помечаем, где mse > threshold)
             anomaly_flags = np.zeros(len(reconstruction_errors))
             anomaly_flags[anomalies] = 1
             self.curve_predicted_anomalies.setData(anomaly_flags)
@@ -318,5 +331,5 @@ class AutoencoderApp(QtWidgets.QDialog, Ui_Dialog):
 if __name__ == "__main__":
     app = QtWidgets.QApplication(sys.argv)
     window = AutoencoderApp()
-    window.show()
+    window.showMaximized()
     sys.exit(app.exec_())

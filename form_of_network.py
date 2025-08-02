@@ -11,16 +11,23 @@
 from PyQt5 import QtCore, QtGui, QtWidgets
 from PyQt5.QtWidgets import QPlainTextEdit, QVBoxLayout, QHBoxLayout, QGridLayout, QComboBox, QLineEdit, QSpinBox
 
+
 class Ui_Dialog(object):
     def setupUi(self, Dialog):
         Dialog.setObjectName("Dialog")
         Dialog.resize(1675, 1022)
+        # Убираем старый self.widget и создаем новый для правильной компоновки
         self.widget = QtWidgets.QWidget(Dialog)
         self.widget.setGeometry(QtCore.QRect(20, 10, 1641, 1001))
         self.widget.setObjectName("widget")
-        self.verticalLayout_10 = QtWidgets.QVBoxLayout(self.widget)
-        self.verticalLayout_10.setContentsMargins(0, 0, 0, 0)
+        self.verticalLayout_10 = QtWidgets.QVBoxLayout(Dialog)  # Главный макет для окна
         self.verticalLayout_10.setObjectName("verticalLayout_10")
+
+        # Переносим все виджеты в новый, масштабируемый макет
+        self.internal_widget_layout = QtWidgets.QVBoxLayout(self.widget)
+        self.internal_widget_layout.setContentsMargins(0, 0, 0, 0)
+        self.internal_widget_layout.setObjectName("internal_widget_layout")
+
         self.label_name_of_programm = QtWidgets.QLabel(self.widget)
         font = QtGui.QFont()
         font.setFamily("Tw Cen MT")
@@ -30,7 +37,7 @@ class Ui_Dialog(object):
         self.label_name_of_programm.setFont(font)
         self.label_name_of_programm.setAlignment(QtCore.Qt.AlignCenter)
         self.label_name_of_programm.setObjectName("label_name_of_programm")
-        self.verticalLayout_10.addWidget(self.label_name_of_programm)
+        self.internal_widget_layout.addWidget(self.label_name_of_programm)
         self.horizontalLayout_3 = QtWidgets.QHBoxLayout()
         self.horizontalLayout_3.setObjectName("horizontalLayout_3")
         self.verticalLayout_9 = QtWidgets.QVBoxLayout()
@@ -69,7 +76,6 @@ class Ui_Dialog(object):
         self.label_name_batch_size = QtWidgets.QLabel(self.widget)
         font = QtGui.QFont()
         font.setFamily("Tw Cen MT Condensed Extra Bold")
-        # ИСПРАВЛЕНО: Должно быть font.setPointSize(13)
         font.setPointSize(13)
         self.label_name_batch_size.setFont(font)
         self.label_name_batch_size.setObjectName("label_name_batch_size")
@@ -315,7 +321,8 @@ class Ui_Dialog(object):
         self.widget_plot_anomaly_comparison.setObjectName("widget_plot_anomaly_comparison")
         self.verticalLayout_8.addWidget(self.splitter_3)
         self.horizontalLayout_3.addLayout(self.verticalLayout_8)
-        self.verticalLayout_10.addLayout(self.horizontalLayout_3)
+        self.internal_widget_layout.addLayout(self.horizontalLayout_3)
+        self.verticalLayout_10.addWidget(self.widget)
 
         self.retranslateUi(Dialog)
         QtCore.QMetaObject.connectSlotsByName(Dialog)
@@ -334,18 +341,23 @@ class Ui_Dialog(object):
         self.label_name_vvod_data.setText(_translate("Dialog", "Ввести необходимые данные для работы"))
         self.pushButton_vvod_data.setText(_translate("Dialog", "Ввод данных"))
         self.groupBox_2.setTitle(_translate("Dialog", "Обучение"))
-        self.label_name_load_static_date_for_learning.setText(_translate("Dialog", "Загрузка файла со статистическими данными для обучения"))
+        self.label_name_load_static_date_for_learning.setText(
+            _translate("Dialog", "Загрузка файла со статистическими данными для обучения"))
         self.pushButton_load_file_for_learning.setText(_translate("Dialog", "Загрузить файл"))
         self.label_name_learn_model.setText(_translate("Dialog", "Для обучения модели на новом файле"))
         self.pushButton_learn_model.setText(_translate("Dialog", "Обучить модель"))
         self.label_name_save_model.setText(_translate("Dialog", "Для сохранения обученной модели"))
         self.pushButton_save_model.setText(_translate("Dialog", "Сохранить модель"))
         self.groupBox.setTitle(_translate("Dialog", "Тестировка"))
-        self.label_name_load_test_file.setText(_translate("Dialog", "Загрузка файла, со статистическими данными для тестирования"))
+        self.label_name_load_test_file.setText(
+            _translate("Dialog", "Загрузка файла, со статистическими данными для тестирования"))
         self.pushButton_load_test_file.setText(_translate("Dialog", "Загрузить файл"))
         self.label_name_test_model.setText(_translate("Dialog", "Для тестирования модели на реальном объекте"))
         self.pushButton_test_model.setText(_translate("Dialog", "Тестировать модель"))
-        self.label_name_information_about_work_network.setText(_translate("Dialog", "Информация о работе нейронной сети"))
-        self.label_name_widget_plot_reconstruction_error.setText(_translate("Dialog", "График ошибки реконструкции (MSE)"))
+        self.label_name_information_about_work_network.setText(
+            _translate("Dialog", "Информация о работе нейронной сети"))
+        self.label_name_widget_plot_reconstruction_error.setText(
+            _translate("Dialog", "График ошибки реконструкции (MSE)"))
         self.label_widget_name_plot_loss.setText(_translate("Dialog", "График ошибки обучения и валидации"))
-        self.label_name_widget_plot_anomaly_comparison.setText(_translate("Dialog", "Сравнение: предсказания vs истинные аномалии"))
+        self.label_name_widget_plot_anomaly_comparison.setText(
+            _translate("Dialog", "Сравнение: предсказания vs истинные аномалии"))

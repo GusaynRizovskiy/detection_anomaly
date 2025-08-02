@@ -1,11 +1,6 @@
 # -*- coding: utf-8 -*-
 
 import os
-# Эти строки нужно разместить как можно раньше,
-# чтобы они вступили в силу до первого импорта TensorFlow.
-os.environ['TF_ENABLE_ONEDNN_OPTS'] = '0'
-os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
-
 import sys
 import json
 from datetime import datetime
@@ -21,14 +16,17 @@ from sklearn.preprocessing import MinMaxScaler
 from tensorflow.keras.models import Model, load_model
 from tensorflow.keras.layers import Input, Conv1D, LSTM, RepeatVector
 
-# Импортируем класс UI-формы из модуля form_of_network
-from form_of_network import Ui_Dialog
+# Эти строки нужно разместить как можно раньше,
+# чтобы они вступили в силу до первого импорта TensorFlow.
+os.environ['TF_ENABLE_ONEDNN_OPTS'] = '0'
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 
 # Импортируем класс UI-формы из модуля form_of_network
 from form_of_network import Ui_Dialog
 
 # Настройка логирования
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+
 
 # === Функции для работы с данными и моделью ===
 def load_and_preprocess_data(file_path, scaler, fit_scaler=True):
@@ -107,7 +105,7 @@ class AutoencoderApp(QtWidgets.QDialog, Ui_Dialog):
         self.findChild(QtWidgets.QSpinBox, "spinBox_porog_anomaly_value").deleteLater()
 
         # === Загрузка фонового изображения с обработкой ошибок ===
-        background_image_path = "fon/pucture_fon2.jpg"
+        background_image_path = "fon/bg.jpg"  # Укажите здесь имя вашего файла
         try:
             if os.path.exists(background_image_path):
                 palette = QPalette()
@@ -154,6 +152,12 @@ class AutoencoderApp(QtWidgets.QDialog, Ui_Dialog):
 
     def setup_plots(self):
         """Настраивает виджеты для графиков."""
+
+        # === Установка белого фона для всех графиков ===
+        # Используем pg.setConfigOption для установки глобальных параметров
+        pg.setConfigOption('background', 'w')  # 'w' - белый цвет
+        pg.setConfigOption('foreground', 'k')  # 'k' - черный цвет для текста и осей
+
         # График ошибки обучения и валидации
         self.plot_loss = pg.PlotWidget()
         layout_loss = QtWidgets.QVBoxLayout(self.widget_plot_loss)

@@ -100,17 +100,16 @@ class AutoencoderApp(QtWidgets.QDialog, Ui_Dialog):
         self.spinBox_porog_anomaly_value.setDecimals(4)
         self.spinBox_porog_anomaly_value.setSingleStep(0.001)
         self.spinBox_porog_anomaly_value.setRange(0, 1)
-        # Находим макет по имени, чтобы вставить виджет
         layout_to_insert = self.findChild(QtWidgets.QVBoxLayout, "verticalLayout")
         if layout_to_insert:
             layout_to_insert.insertWidget(3, self.spinBox_porog_anomaly_value)
-        # Удаляем старый QSpinBox
         old_spinbox = self.findChild(QtWidgets.QSpinBox, "spinBox_porog_anomaly_value")
         if old_spinbox:
             old_spinbox.deleteLater()
 
-        # === Инициализация фонового изображения ===
+        # === Инициализация фонового изображения и флага ===
         self.background_image_path = "fon/picture_fon2.jpg"
+        self.background_updated_on_startup = False  # Новый флаг
         self.update_background()
 
         # Инициализация переменных
@@ -136,37 +135,40 @@ class AutoencoderApp(QtWidgets.QDialog, Ui_Dialog):
         # Вывод приветственного сообщения
         self.update_status("Программа запущена. Загрузите файлы для обучения или тестирования.")
 
-    # === Добавляем обработчик события изменения размера окна ===
     def resizeEvent(self, event):
         """Обработчик события изменения размера окна."""
         self.update_background()
         super().resizeEvent(event)
 
     def update_background(self):
-        """Метод для установки и масштабирования фонового изображения."""
+        """Метод для установки и масштабирования фонового изображения, с проверкой для консоли."""
         try:
             if os.path.exists(self.background_image_path):
                 palette = QPalette()
                 pixmap = QPixmap(self.background_image_path)
-
-                # Масштабируем изображение под текущий размер окна,
-                # сохраняя пропорции и обрезая лишнее, если нужно.
                 scaled_pixmap = pixmap.scaled(self.size(),
                                               QtCore.Qt.KeepAspectRatioByExpanding,
                                               QtCore.Qt.SmoothTransformation)
-
                 brush = QBrush(scaled_pixmap)
                 palette.setBrush(QPalette.Background, brush)
                 self.setPalette(palette)
                 self.setAutoFillBackground(True)
-                logging.info(f"Фоновое изображение успешно обновлено и масштабировано.")
+
+                # Выводим сообщение только один раз при запуске, а затем только при изменении размера
+                if not self.background_updated_on_startup:
+                    logging.info("Фоновое изображение успешно обновлено и масштабировано.")
+                    self.background_updated_on_startup = True
             else:
-                logging.warning(
-                    f"Фоновое изображение не найдено по пути: {self.background_image_path}. Фон не будет установлен.")
+                if not self.background_updated_on_startup:
+                    logging.warning(
+                        f"Фоновое изображение не найдено по пути: {self.background_image_path}. Фон не будет установлен.")
+                    self.background_updated_on_startup = True
         except Exception as e:
-            logging.error(f"Ошибка при загрузке фонового изображения '{self.background_image_path}': {e}",
-                          exc_info=True)
-            QMessageBox.critical(self, "Ошибка загрузки фона", f"Не удалось загрузить фоновое изображение: {e}")
+            if not self.background_updated_on_startup:
+                logging.error(f"Ошибка при загрузке фонового изображения '{self.background_image_path}': {e}",
+                              exc_info=True)
+                QMessageBox.critical(self, "Ошибка загрузки фона", f"Не удалось загрузить фоновое изображение: {e}")
+                self.background_updated_on_startup = True
 
     # --- Функции для GUI ---
     def update_status(self, message):

@@ -19,6 +19,8 @@ from form_of_network import Ui_Dialog
 from worker import MLWorker, OnlineTestingWorker
 
 
+# ... (остальной код остается без изменений)
+
 # --- Класс основного приложения ---
 class AutoencoderApp(QtWidgets.QDialog, Ui_Dialog):
     # Новые сигналы для запуска операций в рабочих потоках
@@ -32,17 +34,8 @@ class AutoencoderApp(QtWidgets.QDialog, Ui_Dialog):
         super().__init__()
         self.setupUi(self)
 
-        # Переопределяем виджет для порога, так как он должен быть float
-        self.spinBox_porog_anomaly_value = QDoubleSpinBox()
-        self.spinBox_porog_anomaly_value.setDecimals(4)
-        self.spinBox_porog_anomaly_value.setSingleStep(0.001)
-        self.spinBox_porog_anomaly_value.setRange(0, 1)
-        layout_to_insert = self.findChild(QtWidgets.QVBoxLayout, "verticalLayout")
-        if layout_to_insert:
-            layout_to_insert.insertWidget(3, self.spinBox_porog_anomaly_value)
-        old_spinbox = self.findChild(QtWidgets.QSpinBox, "spinBox_porog_anomaly_value")
-        if old_spinbox:
-            old_spinbox.deleteLater()
+        # Переопределять виджеты в main.py больше не нужно,
+        # так как они уже созданы в form_of_network.py с нужными типами
 
         # === Инициализация фонового изображения и флага ===
         self.background_image_path = "fon/picture_fon2.jpg"
@@ -127,13 +120,15 @@ class AutoencoderApp(QtWidgets.QDialog, Ui_Dialog):
         self.pushButton_test_model.clicked.connect(self.start_testing)
         self.pushButton_vvod_data.clicked.connect(self.check_and_accept_parameters)
 
-        # Новая привязка для онлайн-тестирования
+        # Привязка для онлайн-тестирования
         self.pushButton_start_online_testing.clicked.connect(self.start_online_testing)
         self.pushButton_stop_online_testing.clicked.connect(self.stop_online_testing)
 
         self.update_status("Программа запущена. Загрузите файлы для обучения или тестирования.")
         logging.info("Приложение запущено и готово к работе.")
         self.set_ui_state_initial()
+
+    # ... (Остальные методы класса AutoencoderApp остаются без изменений)
 
     def set_ui_state_initial(self):
         """Устанавливает начальное состояние кнопок."""
@@ -182,7 +177,6 @@ class AutoencoderApp(QtWidgets.QDialog, Ui_Dialog):
                 palette.setBrush(QPalette.Background, brush)
                 self.setPalette(palette)
                 self.setAutoFillBackground(True)
-
                 if not self.background_updated_on_startup:
                     logging.info("Фоновое изображение успешно обновлено и масштабировано.")
                     self.background_updated_on_startup = True
@@ -198,7 +192,6 @@ class AutoencoderApp(QtWidgets.QDialog, Ui_Dialog):
                 QMessageBox.critical(self, "Ошибка загрузки фона", f"Не удалось загрузить фоновое изображение: {e}")
                 self.background_updated_on_startup = True
 
-    # --- Функции для GUI ---
     def update_status(self, message):
         self.text_zone.appendPlainText(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] {message}")
 
@@ -286,7 +279,6 @@ class AutoencoderApp(QtWidgets.QDialog, Ui_Dialog):
                                 "Значения 'Временной шаг', 'Количество эпох' и 'Размер батча' не могут быть равны 0. Пожалуйста, введите корректные значения.")
             return
 
-        # Блокировка кнопок во время обучения
         self.pushButton_load_file_for_learning.setEnabled(False)
         self.pushButton_learn_model.setEnabled(False)
         self.pushButton_load_model.setEnabled(False)
@@ -305,7 +297,6 @@ class AutoencoderApp(QtWidgets.QDialog, Ui_Dialog):
         self.spinBox_porog_anomaly_value.setValue(self.threshold)
         self.update_status(f"Автоматически рассчитанный порог аномалии: {self.threshold:.4f}")
 
-        # Разблокировка кнопок после обучения
         self.set_ui_state_after_learning_or_loading()
 
     def save_model(self):
@@ -329,13 +320,11 @@ class AutoencoderApp(QtWidgets.QDialog, Ui_Dialog):
                 if not os.path.exists(file_path):
                     QMessageBox.critical(self, "Ошибка загрузки", "Файл модели не найден по указанному пути.")
                     return
-
                 custom_objects = {
                     'mse': mse_loss,
                     'MeanSquaredError': MeanSquaredError
                 }
                 self.ml_worker.autoencoder = load_model(file_path, custom_objects=custom_objects)
-
                 scaler_path = file_path.replace('.h5', '_scaler.pkl')
                 if os.path.exists(scaler_path):
                     with open(scaler_path, 'rb') as f:
@@ -359,19 +348,15 @@ class AutoencoderApp(QtWidgets.QDialog, Ui_Dialog):
         if not self.test_file_path:
             QMessageBox.warning(self, "Ошибка", "Пожалуйста, сначала выберите файл для тестирования.")
             return
-
         time_step = self.spinBox_timestep_value.value()
         threshold = self.spinBox_porog_anomaly_value.value()
-
         if time_step == 0:
             QMessageBox.warning(self, "Ошибка",
                                 "Значение 'Временной шаг' не может быть равно 0. Пожалуйста, введите корректное значение.")
             return
-
         if threshold == 0:
             QMessageBox.warning(self, "Предупреждение",
                                 "Порог аномалии равен 0. Используйте рассчитанный порог или введите вручную.")
-
         self.start_testing_signal.emit(self.test_file_path, time_step, threshold)
 
     def handle_testing_results(self, results):
@@ -385,7 +370,6 @@ class AutoencoderApp(QtWidgets.QDialog, Ui_Dialog):
             self.update_status("--- Индексы аномальных временных окон: ---")
             self.update_status(f"{results['anomalies']}")
 
-    # --- Новые методы для онлайн-тестирования ---
     def start_online_testing(self):
         if self.ml_worker.autoencoder is None or self.ml_worker.scaler is None:
             QMessageBox.warning(self, "Ошибка", "Сначала обучите или загрузите модель.")
@@ -405,7 +389,6 @@ class AutoencoderApp(QtWidgets.QDialog, Ui_Dialog):
         self.plot_reconstruction_error.addItem(self.threshold_line)
         self.threshold_line.setPos(threshold)
 
-        # Блокировка кнопок, пока идет онлайн-тестирование
         self.pushButton_start_online_testing.setEnabled(False)
         self.pushButton_stop_online_testing.setEnabled(True)
 

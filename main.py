@@ -18,9 +18,6 @@ from tensorflow.keras.losses import MeanSquaredError as mse_loss
 from form_of_network import Ui_Dialog
 from worker import MLWorker, OnlineTestingWorker
 
-
-# ... (остальной код остается без изменений)
-
 # --- Класс основного приложения ---
 class AutoencoderApp(QtWidgets.QDialog, Ui_Dialog):
     # Новые сигналы для запуска операций в рабочих потоках

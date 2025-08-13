@@ -1,5 +1,4 @@
 # -*- coding: utf-8 -*-
-
 import os
 import sys
 import json
@@ -7,7 +6,6 @@ from datetime import datetime
 import pandas as pd
 import numpy as np
 import pyqtgraph as pg
-import requests
 import logging
 from PyQt5 import QtWidgets, QtCore, QtGui
 from PyQt5.QtWidgets import QFileDialog, QMessageBox, QDoubleSpinBox
@@ -17,16 +15,18 @@ import pickle
 from tensorflow.keras.metrics import MeanSquaredError
 from tensorflow.keras.losses import MeanSquaredError as mse_loss
 
-# Импортируем класс UI-формы из модуля form_of_network и новый класс Worker
 from form_of_network import Ui_Dialog
-from worker import Worker  # Импортируем новый класс
+from worker import MLWorker, OnlineTestingWorker
 
 
 # --- Класс основного приложения ---
 class AutoencoderApp(QtWidgets.QDialog, Ui_Dialog):
-    # Новые сигналы для запуска операций в рабочем потоке
+    # Новые сигналы для запуска операций в рабочих потоках
     start_learning_signal = QtCore.pyqtSignal(str, int, int, int)
     start_testing_signal = QtCore.pyqtSignal(str, int, float)
+    # Сигналы для управления сетевым прослушиванием
+    start_online_listening_signal = QtCore.pyqtSignal(int, int, float)
+    stop_online_listening_signal = QtCore.pyqtSignal()
 
     def __init__(self):
         super().__init__()
@@ -58,6 +58,7 @@ class AutoencoderApp(QtWidgets.QDialog, Ui_Dialog):
         self.spinBox_batch_size_value.setValue(32)
         self.spinBox_timestep_value.setValue(10)
         self.spinBox_porog_anomaly_value.setValue(0.001)
+        self.spinBox_online_port.setValue(12345)
 
         # === Настройка логирования ===
         if not os.path.exists('log'):
@@ -71,36 +72,51 @@ class AutoencoderApp(QtWidgets.QDialog, Ui_Dialog):
                 logging.StreamHandler(sys.stdout)
             ]
         )
-        # Отключаем логирование Tensorflow, чтобы не засорять логи
         os.environ['TF_ENABLE_ONEDNN_OPTS'] = '0'
         os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 
-        # === Настройка рабочего потока ===
-        self.worker_thread = QtCore.QThread()
-        self.worker = Worker()
-        self.worker.moveToThread(self.worker_thread)
+        # === Настройка рабочих потоков ===
+        self.ml_worker_thread = QtCore.QThread()
+        self.ml_worker = MLWorker()
+        self.ml_worker.moveToThread(self.ml_worker_thread)
+
+        self.online_worker_thread = QtCore.QThread()
+        self.online_worker = OnlineTestingWorker()
+        self.online_worker.moveToThread(self.online_worker_thread)
 
         # Подключение сигналов и слотов
-        self.worker_thread.started.connect(lambda: logging.info("Рабочий поток запущен."))
-        self.worker_thread.finished.connect(lambda: logging.info("Рабочий поток завершен."))
+        self.ml_worker_thread.started.connect(lambda: logging.info("ML-поток запущен."))
+        self.online_worker_thread.started.connect(lambda: logging.info("Онлайн-поток запущен."))
 
-        # Подключаем сигналы главного потока к слотам рабочего потока
-        self.start_learning_signal.connect(self.worker.start_learning)
-        self.start_testing_signal.connect(self.worker.start_testing)
+        # Связываем сигналы UI с ML-потоком
+        self.start_learning_signal.connect(self.ml_worker.start_learning)
+        self.start_testing_signal.connect(self.ml_worker.start_testing)
+        self.ml_worker.learning_finished.connect(self.handle_learning_results)
+        self.ml_worker.testing_finished.connect(self.handle_testing_results)
 
-        # Подключаем сигналы рабочего потока к слотам главного потока
-        self.worker.learning_finished.connect(self.handle_learning_results)
-        self.worker.testing_finished.connect(self.handle_testing_results)
-        self.worker.update_status_signal.connect(self.update_status)
-        self.worker.update_plot_signal.connect(self.update_learning_plot)
+        # Связываем сигналы UI с онлайн-потоком
+        self.start_online_listening_signal.connect(self.online_worker.start_listening)
+        self.stop_online_listening_signal.connect(self.online_worker.stop_listening)
 
-        self.worker_thread.start()
+        # Связываем сигналы между рабочими потоками
+        self.online_worker.data_received_signal.connect(self.ml_worker.process_online_data)
+        self.ml_worker.online_results_signal.connect(self.handle_online_results)
+
+        # Связываем сигналы статуса и графиков со всеми потоками
+        self.ml_worker.update_status_signal.connect(self.update_status)
+        self.online_worker.update_status_signal.connect(self.update_status)
+        self.ml_worker.update_plot_signal.connect(self.update_learning_plot)
+
+        # Запускаем потоки
+        self.ml_worker_thread.start()
+        self.online_worker_thread.start()
 
         # Инициализация графиков
         self.setup_plots()
         self.epoch_x = []
         self.train_loss_y = []
         self.val_loss_y = []
+        self.online_reconstruction_errors = []
 
         # Привязка кнопок к функциям
         self.pushButton_load_file_for_learning.clicked.connect(self.load_learning_file)
@@ -111,11 +127,12 @@ class AutoencoderApp(QtWidgets.QDialog, Ui_Dialog):
         self.pushButton_test_model.clicked.connect(self.start_testing)
         self.pushButton_vvod_data.clicked.connect(self.check_and_accept_parameters)
 
-        # Вывод приветственного сообщения
+        # Новая привязка для онлайн-тестирования
+        self.pushButton_start_online_testing.clicked.connect(self.start_online_testing)
+        self.pushButton_stop_online_testing.clicked.connect(self.stop_online_testing)
+
         self.update_status("Программа запущена. Загрузите файлы для обучения или тестирования.")
         logging.info("Приложение запущено и готово к работе.")
-
-        # Начальное состояние кнопок
         self.set_ui_state_initial()
 
     def set_ui_state_initial(self):
@@ -127,6 +144,8 @@ class AutoencoderApp(QtWidgets.QDialog, Ui_Dialog):
         self.pushButton_load_test_file.setEnabled(False)
         self.pushButton_test_model.setEnabled(False)
         self.pushButton_vvod_data.setEnabled(True)
+        self.pushButton_start_online_testing.setEnabled(True)
+        self.pushButton_stop_online_testing.setEnabled(False)
 
     def set_ui_state_after_learning_or_loading(self):
         """Устанавливает состояние кнопок после обучения или загрузки модели."""
@@ -137,10 +156,14 @@ class AutoencoderApp(QtWidgets.QDialog, Ui_Dialog):
         self.pushButton_load_test_file.setEnabled(True)
         self.pushButton_test_model.setEnabled(True)
         self.pushButton_vvod_data.setEnabled(False)
+        self.pushButton_start_online_testing.setEnabled(True)
+        self.pushButton_stop_online_testing.setEnabled(False)
 
     def closeEvent(self, event):
-        self.worker_thread.quit()
-        self.worker_thread.wait()
+        self.ml_worker_thread.quit()
+        self.ml_worker_thread.wait()
+        self.online_worker_thread.quit()
+        self.online_worker_thread.wait()
         event.accept()
 
     def resizeEvent(self, event):
@@ -213,7 +236,7 @@ class AutoencoderApp(QtWidgets.QDialog, Ui_Dialog):
 
     @QtCore.pyqtSlot(dict)
     def update_learning_plot(self, epoch_logs):
-        if not self.worker.is_learning_running:
+        if not self.ml_worker.is_learning_running:
             return
 
         self.epoch_x.append(epoch_logs['epoch'])
@@ -286,15 +309,15 @@ class AutoencoderApp(QtWidgets.QDialog, Ui_Dialog):
         self.set_ui_state_after_learning_or_loading()
 
     def save_model(self):
-        if self.worker.autoencoder is None or self.worker.scaler is None:
+        if self.ml_worker.autoencoder is None or self.ml_worker.scaler is None:
             QMessageBox.warning(self, "Ошибка", "Сначала обучите или загрузите модель.")
             return
         file_path, _ = QFileDialog.getSaveFileName(self, "Сохранить модель", "", "HDF5 Files (*.h5)")
         if file_path:
             try:
-                self.worker.autoencoder.save(file_path)
+                self.ml_worker.autoencoder.save(file_path)
                 with open(file_path.replace('.h5', '_scaler.pkl'), 'wb') as f:
-                    pickle.dump(self.worker.scaler, f)
+                    pickle.dump(self.ml_worker.scaler, f)
                 self.update_status(f"✅ Модель и скейлер успешно сохранены в: {file_path}")
             except Exception as e:
                 QMessageBox.critical(self, "Ошибка сохранения", f"Не удалось сохранить модель: {e}")
@@ -311,18 +334,18 @@ class AutoencoderApp(QtWidgets.QDialog, Ui_Dialog):
                     'mse': mse_loss,
                     'MeanSquaredError': MeanSquaredError
                 }
-                self.worker.autoencoder = load_model(file_path, custom_objects=custom_objects)
+                self.ml_worker.autoencoder = load_model(file_path, custom_objects=custom_objects)
 
                 scaler_path = file_path.replace('.h5', '_scaler.pkl')
                 if os.path.exists(scaler_path):
                     with open(scaler_path, 'rb') as f:
-                        self.worker.scaler = pickle.load(f)
+                        self.ml_worker.scaler = pickle.load(f)
                     self.update_status(f"✅ Модель успешно загружена из: {file_path}")
                     self.update_status("✅ Скейлер для нормализации успешно загружен.")
                     self.set_ui_state_after_learning_or_loading()
                 else:
                     QMessageBox.warning(self, "Предупреждение", "Файл скейлера не найден. Загружена только модель.")
-                    self.worker.scaler = None
+                    self.ml_worker.scaler = None
                     self.update_status(f"✅ Модель успешно загружена из: {file_path}, но скейлер не найден.")
             except Exception as e:
                 QMessageBox.critical(self, "Ошибка загрузки", f"Не удалось загрузить модель: {e}")
@@ -330,7 +353,7 @@ class AutoencoderApp(QtWidgets.QDialog, Ui_Dialog):
                 self.set_ui_state_initial()
 
     def start_testing(self):
-        if self.worker.autoencoder is None:
+        if self.ml_worker.autoencoder is None:
             QMessageBox.warning(self, "Ошибка", "Сначала обучите или загрузите модель.")
             return
         if not self.test_file_path:
@@ -353,20 +376,65 @@ class AutoencoderApp(QtWidgets.QDialog, Ui_Dialog):
 
     def handle_testing_results(self, results):
         threshold = self.spinBox_porog_anomaly_value.value()
-
         self.curve_reconstruction_error.setData(results['reconstruction_errors'])
         self.threshold_line.setPos(threshold)
-
         anomaly_flags = np.zeros(len(results['reconstruction_errors']))
         anomaly_flags[results['anomalies']] = 1
         self.curve_predicted_anomalies.setData(anomaly_flags)
-
         if len(results['anomalies']) > 0:
             self.update_status("--- Индексы аномальных временных окон: ---")
             self.update_status(f"{results['anomalies']}")
 
+    # --- Новые методы для онлайн-тестирования ---
+    def start_online_testing(self):
+        if self.ml_worker.autoencoder is None or self.ml_worker.scaler is None:
+            QMessageBox.warning(self, "Ошибка", "Сначала обучите или загрузите модель.")
+            return
+        if self.online_worker.is_running:
+            QMessageBox.warning(self, "Предупреждение", "Онлайн-тестирование уже запущено.")
+            return
 
-# --- Основная точка входа в приложение ---
+        port = self.spinBox_online_port.value()
+        time_step = self.spinBox_timestep_value.value()
+        threshold = self.spinBox_porog_anomaly_value.value()
+
+        self.online_reconstruction_errors.clear()
+        self.plot_reconstruction_error.clear()
+        self.curve_reconstruction_error = self.plot_reconstruction_error.plot(pen='g', name='MSE')
+        self.threshold_line = pg.InfiniteLine(angle=0, movable=False, pen='r')
+        self.plot_reconstruction_error.addItem(self.threshold_line)
+        self.threshold_line.setPos(threshold)
+
+        # Блокировка кнопок, пока идет онлайн-тестирование
+        self.pushButton_start_online_testing.setEnabled(False)
+        self.pushButton_stop_online_testing.setEnabled(True)
+
+        self.start_online_listening_signal.emit(port, time_step, threshold)
+
+    def stop_online_testing(self):
+        self.stop_online_listening_signal.emit()
+        self.pushButton_start_online_testing.setEnabled(True)
+        self.pushButton_stop_online_testing.setEnabled(False)
+
+    @QtCore.pyqtSlot(dict)
+    def handle_online_results(self, results):
+        error = results['error']
+        is_anomaly = results['is_anomaly']
+
+        self.online_reconstruction_errors.append(error)
+        self.curve_reconstruction_error.setData(self.online_reconstruction_errors)
+
+        if is_anomaly:
+            self.update_status(f"⚠️ АНОМАЛИЯ ОБНАРУЖЕНА! Ошибка: {error:.4f}")
+            x_pos = len(self.online_reconstruction_errors) - 1
+            anomaly_point = pg.ScatterPlotItem([x_pos], [error], symbol='o', size=10, pen={'color': 'r', 'width': 2},
+                                               brush='r')
+            self.plot_reconstruction_error.addItem(anomaly_point)
+        else:
+            self.update_status(f"✅ Данные получены. Ошибка: {error:.4f}")
+
+
+# --- Главная точка входа ---
 if __name__ == "__main__":
     app = QtWidgets.QApplication(sys.argv)
     window = AutoencoderApp()

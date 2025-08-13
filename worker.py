@@ -10,11 +10,14 @@ from tensorflow.keras.layers import Input, Conv1D, LSTM, RepeatVector
 from sklearn.preprocessing import MinMaxScaler
 import pickle
 from tensorflow.keras.callbacks import Callback
+import socket
+import json
+import collections
 
-# Логирование настраивается в главном модуле, здесь просто получаем логгер
 logger = logging.getLogger(__name__)
 
 
+# Класс обратного вызова для отрисовки графиков обучения
 class PlotCallback(Callback):
     """
     Класс обратного вызова для отправки данных о loss на каждой эпохе.
@@ -31,14 +34,14 @@ class PlotCallback(Callback):
             self.signal.emit({'epoch': epoch, 'loss': loss, 'val_loss': val_loss})
 
 
-class Worker(QtCore.QObject):
+# --- Класс для задач машинного обучения ---
+class MLWorker(QtCore.QObject):
     """
-    Класс-работник для выполнения ресурсоемких операций в отдельном потоке.
-    Наследуется от QObject для использования сигналов.
+    Класс-работник для выполнения ресурсоемких операций ML в отдельном потоке.
     """
-
     learning_finished = QtCore.pyqtSignal(dict)
     testing_finished = QtCore.pyqtSignal(dict)
+    online_results_signal = QtCore.pyqtSignal(dict)
     update_status_signal = QtCore.pyqtSignal(str)
     update_plot_signal = QtCore.pyqtSignal(dict)
 
@@ -48,7 +51,6 @@ class Worker(QtCore.QObject):
         self.scaler = None
         self.is_learning_running = False
         self.is_testing_running = False
-        self.epoch_data = {'loss': [], 'val_loss': []}
 
     def load_and_preprocess_data(self, file_path, scaler, fit_scaler=True):
         """Загрузка, очистка и нормализация данных с обработкой кодировки и разделителей."""
@@ -61,7 +63,6 @@ class Worker(QtCore.QObject):
         encodings = ['utf-8', 'cp1251']
 
         logger.info(f"Начинаем загрузку файла: {file_path}")
-        # Перебираем возможные разделители и кодировки
         for delimiter in delimiters:
             for encoding in encodings:
                 try:
@@ -235,5 +236,125 @@ class Worker(QtCore.QObject):
         finally:
             self.is_testing_running = False
 
-    def stop(self):
-        pass
+    @QtCore.pyqtSlot(list, int, float)
+    def process_online_data(self, data_list, time_step, threshold):
+        if self.autoencoder is None or self.scaler is None:
+            self.update_status_signal.emit("❌ Ошибка: Модель не обучена или не загружена для онлайн-тестирования.")
+            return
+
+        try:
+            # Преобразуем данные в DataFrame для нормализации
+            df = pd.DataFrame(data_list)
+            # Применяем тот же scaler, что использовался при обучении
+            scaled_data = self.scaler.transform(df)
+
+            # Создаем временное окно для предсказания
+            X_new = np.array([scaled_data])
+            X_new = X_new.reshape(X_new.shape[0], time_step, scaled_data.shape[1])
+
+            # Предсказание
+            reconstruction_errors = np.mean(np.power(X_new - self.autoencoder.predict(X_new, verbose=0), 2),
+                                            axis=(1, 2))
+            is_anomaly = reconstruction_errors[0] > threshold
+
+            results = {
+                'error': reconstruction_errors[0],
+                'is_anomaly': is_anomaly
+            }
+            self.online_results_signal.emit(results)
+        except Exception as e:
+            logger.error(f"Ошибка при обработке онлайн-данных: {e}", exc_info=True)
+            self.update_status_signal.emit(f"❌ Ошибка при обработке онлайн-данных: {e}")
+
+
+# --- Новый класс для онлайн-тестирования (сетевой сокет) ---
+class OnlineTestingWorker(QtCore.QObject):
+    """
+    Класс-работник для прослушивания порта и приема данных по сети.
+    """
+    update_status_signal = QtCore.pyqtSignal(str)
+    # Сигнал для отправки полученных данных в MLWorker
+    data_received_signal = QtCore.pyqtSignal(list, int, float)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.is_running = False
+        self.socket = None
+        self.data_buffer = collections.deque(maxlen=100)  # Буфер для time_step пакетов
+        self.lock = QtCore.QMutex()  # Мьютекс для безопасной работы с буфером
+
+    @QtCore.pyqtSlot(int, int, float)
+    def start_listening(self, port, time_step, threshold):
+        if self.is_running:
+            self.update_status_signal.emit("⚠️ Онлайн-тестирование уже запущено.")
+            return
+
+        self.is_running = True
+        self.time_step = time_step
+        self.threshold = threshold
+
+        self.update_status_signal.emit(f"▶️ Запуск сервера для приема данных на порту: {port}...")
+
+        self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.socket.settimeout(1.0)  # Небольшой таймаут, чтобы поток можно было остановить
+
+        try:
+            self.socket.bind(('0.0.0.0', port))
+            self.socket.listen(1)
+            self.update_status_signal.emit(f"✅ Сервер запущен, ожидаем подключения от сниффера...")
+
+            conn, addr = self.socket.accept()
+            with conn:
+                self.update_status_signal.emit(f"🔗 Установлено соединение с клиентом: {addr}")
+                buffer = b''
+                while self.is_running:
+                    data = conn.recv(4096)
+                    if not data:
+                        self.update_status_signal.emit(f"Соединение закрыто клиентом: {addr}")
+                        break
+
+                    buffer += data
+                    # Попытка обработать данные.
+                    try:
+                        decoded_data = buffer.decode('utf-8')
+                        data_list = json.loads(decoded_data)
+
+                        # Собираем данные в буфер для создания временного окна
+                        with self.lock:
+                            self.data_buffer.extend(data_list)
+
+                            # Если данных в буфере достаточно для создания временного окна, отправляем их
+                            if len(self.data_buffer) >= self.time_step:
+                                window = list(self.data_buffer)[-self.time_step:]
+                                self.data_received_signal.emit(window, self.time_step, self.threshold)
+
+                        buffer = b''  # Очищаем буфер после успешной обработки
+
+                    except json.JSONDecodeError:
+                        # Если JSON неполный, продолжаем накапливать данные в буфере
+                        continue
+                    except Exception as e:
+                        logger.error(f"Ошибка при обработке полученных данных: {e}", exc_info=True)
+                        self.update_status_signal.emit(f"❌ Ошибка при обработке данных: {e}")
+                        buffer = b''
+
+        except socket.timeout:
+            # Таймаут - это нормально, просто проверяем, не нужно ли остановить поток
+            if self.is_running:
+                QtCore.QTimer.singleShot(100, lambda: self.start_listening(port, time_step,
+                                                                           threshold))  # Перезапускаем ожидание
+        except Exception as e:
+            self.update_status_signal.emit(f"❌ Ошибка при запуске сервера: {e}")
+            logger.critical("Не удалось запустить сокет-сервер", exc_info=True)
+        finally:
+            self.stop_listening()
+
+    @QtCore.pyqtSlot()
+    def stop_listening(self):
+        if self.is_running:
+            self.is_running = False
+            self.update_status_signal.emit("⏹️ Остановка сервера...")
+            if self.socket:
+                self.socket.close()
+                self.socket = None
+                self.update_status_signal.emit("✅ Сервер остановлен.")

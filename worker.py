@@ -243,14 +243,21 @@ class MLWorker(QtCore.QObject):
             return
 
         try:
-            # Преобразуем данные в DataFrame для нормализации
-            df = pd.DataFrame(data_list)
+            # Преобразуем список списков в NumPy-массив
+            data_array = np.array(data_list)
+
+            # Убедимся, что количество признаков совпадает
+            if data_array.shape[1] != self.scaler.n_features_in_:
+                raise ValueError(
+                    f"Неверное количество признаков в онлайн-данных. Ожидается {self.scaler.n_features_in_}, получено {data_array.shape[1]}."
+                )
+
             # Применяем тот же scaler, что использовался при обучении
-            scaled_data = self.scaler.transform(df)
+            scaled_data = self.scaler.transform(data_array)
 
             # Создаем временное окно для предсказания
-            X_new = np.array([scaled_data])
-            X_new = X_new.reshape(X_new.shape[0], time_step, scaled_data.shape[1])
+            # reshape не нужен, т.к. data_array уже имеет нужную структуру (time_step, n_features)
+            X_new = scaled_data.reshape(1, time_step, scaled_data.shape[1])
 
             # Предсказание
             reconstruction_errors = np.mean(np.power(X_new - self.autoencoder.predict(X_new, verbose=0), 2),
@@ -262,6 +269,7 @@ class MLWorker(QtCore.QObject):
                 'is_anomaly': is_anomaly
             }
             self.online_results_signal.emit(results)
+
         except Exception as e:
             logger.error(f"Ошибка при обработке онлайн-данных: {e}", exc_info=True)
             self.update_status_signal.emit(f"❌ Ошибка при обработке онлайн-данных: {e}")
@@ -320,18 +328,20 @@ class OnlineTestingWorker(QtCore.QObject):
                         data_list = json.loads(decoded_data)
 
                         # Собираем данные в буфер для создания временного окна
-                        with self.lock:
+                        self.lock.lock()
+                        try:
                             self.data_buffer.extend(data_list)
-
-                            # Если данных в буфере достаточно для создания временного окна, отправляем их
+                            # Если данных в буфере достаточно, отправляем их
                             if len(self.data_buffer) >= self.time_step:
                                 window = list(self.data_buffer)[-self.time_step:]
                                 self.data_received_signal.emit(window, self.time_step, self.threshold)
+                        finally:
+                            self.lock.unlock()
 
                         buffer = b''  # Очищаем буфер после успешной обработки
 
                     except json.JSONDecodeError:
-                        # Если JSON неполный, продолжаем накапливать данные в буфере
+                        # Если JSON неполный, продолжаем накапливать данные
                         continue
                     except Exception as e:
                         logger.error(f"Ошибка при обработке полученных данных: {e}", exc_info=True)

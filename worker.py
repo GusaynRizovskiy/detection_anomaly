@@ -249,10 +249,6 @@ class MLWorker(QtCore.QObject):
             # Преобразуем список в NumPy-массив
             data_array = np.array(data_list)
 
-            # Если массив одномерный, преобразуем его в двумерный (1, n)
-            if data_array.ndim == 1:
-                data_array = data_array.reshape(1, -1)
-
             # Убедимся, что количество признаков совпадает с обученной моделью
             if data_array.shape[1] != self.scaler.n_features_in_:
                 raise ValueError(
@@ -295,7 +291,8 @@ class OnlineTestingWorker(QtCore.QObject):
         super().__init__(parent)
         self.is_running = False
         self.socket = None
-        self.data_buffer = collections.deque(maxlen=100)
+        # Увеличиваем размер буфера, чтобы хранить больше окон
+        self.data_buffer = collections.deque(maxlen=1000)
         self.lock = QtCore.QMutex()
 
     @QtCore.pyqtSlot(int, int, float)
@@ -344,12 +341,14 @@ class OnlineTestingWorker(QtCore.QObject):
                         # Собираем данные в буфер
                         self.lock.lock()
                         try:
-                            # Метод extend() добавляет каждый элемент списка по отдельности
-                            self.data_buffer.extend(data_list)
+                            # ИСПРАВЛЕНИЕ: Используем append(), чтобы добавить список целиком
+                            self.data_buffer.append(data_list)
 
                             # Если данных в буфере достаточно, отправляем их
                             if len(self.data_buffer) >= self.time_step:
+                                # Извлекаем временное окно
                                 window = list(self.data_buffer)[-self.time_step:]
+                                # Отправляем window, которое теперь является списком списков
                                 self.data_received_signal.emit(window, self.time_step, self.threshold)
                         finally:
                             self.lock.unlock()

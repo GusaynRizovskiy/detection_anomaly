@@ -13,6 +13,7 @@ from tensorflow.keras.callbacks import Callback
 import socket
 import json
 import collections
+from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
@@ -236,6 +237,51 @@ class MLWorker(QtCore.QObject):
         finally:
             self.is_testing_running = False
 
+    def _log_incident(self, error, metrics):
+        """
+        Создает и записывает инцидент в локальный файл в формате JSON.
+        """
+        # Создаем директорию 'incidents', если она не существует
+        if not os.path.exists('incidents'):
+            os.makedirs('incidents')
+
+        # Формируем структуру JSON-сообщения согласно требованиям
+        incident = {
+            "gid": None,
+            "sid": None,
+            "rev": None,
+            "signature_msg": f"Обнаружена аномалия. Ошибка реконструкции: {error:.4f}",
+            "appearance_time": datetime.now().isoformat(),
+            "priority": 1,
+            # Временно заполняем неизвестными значениями, т.к. система не имеет доступа к пакетам
+            "source_ip": "N/A",
+            "source_port": "N/A",
+            "destination_ip": "N/A",
+            "destination_port": "N/A",
+            "packet_dump": "N/A",
+            "metrics": metrics
+        }
+
+        file_path = 'incidents/incidents.json'
+
+        # Если файл не существует, создаем его с начальной структурой
+        if not os.path.exists(file_path) or os.path.getsize(file_path) == 0:
+            with open(file_path, 'w', encoding='utf-8') as f:
+                json.dump([incident], f, indent=4)
+        else:
+            # Читаем существующие инциденты, добавляем новый и перезаписываем файл
+            try:
+                with open(file_path, 'r+', encoding='utf-8') as f:
+                    data = json.load(f)
+                    data.append(incident)
+                    f.seek(0)
+                    json.dump(data, f, indent=4)
+                    f.truncate()
+            except json.JSONDecodeError:
+                # Если файл поврежден, создаем новый
+                with open(file_path, 'w', encoding='utf-8') as f:
+                    json.dump([incident], f, indent=4)
+
     @QtCore.pyqtSlot(list, int, float)
     def process_online_data(self, data_list, time_step, threshold):
         if self.autoencoder is None or self.scaler is None:
@@ -259,7 +305,6 @@ class MLWorker(QtCore.QObject):
             scaled_data = self.scaler.transform(data_array)
 
             # Создаем временное окно для предсказания
-            # reshape не нужен, т.к. data_array уже имеет нужную структуру (time_step, n_features)
             X_new = scaled_data.reshape(1, time_step, scaled_data.shape[1])
 
             # Предсказание
@@ -272,6 +317,13 @@ class MLWorker(QtCore.QObject):
                 'is_anomaly': is_anomaly
             }
             self.online_results_signal.emit(results)
+
+            # --- НОВАЯ ЛОГИКА ДЛЯ КОМБИНИРОВАННОГО ПОДХОДА ---
+            # Если обнаружена аномалия, записываем ее в локальный файл
+            if is_anomaly:
+                self._log_incident(results['error'], data_list)
+                self.update_status_signal.emit("📝 Инцидент записан в локальный журнал.")
+            # --- КОНЕЦ НОВОЙ ЛОГИКИ ---
 
         except Exception as e:
             logger.error(f"Ошибка при обработке онлайн-данных: {e}", exc_info=True)
@@ -291,7 +343,6 @@ class OnlineTestingWorker(QtCore.QObject):
         super().__init__(parent)
         self.is_running = False
         self.socket = None
-        # Увеличиваем размер буфера, чтобы хранить больше окон
         self.data_buffer = collections.deque(maxlen=1000)
         self.lock = QtCore.QMutex()
 
@@ -331,32 +382,25 @@ class OnlineTestingWorker(QtCore.QObject):
                         decoded_data = buffer.decode('utf-8')
                         data_list = json.loads(decoded_data)
 
-                        # --- ИСПРАВЛЕНИЕ: ПРОВЕРКА НА ТИП ДАННЫХ ---
-                        # Убеждаемся, что data_list - это список.
                         if not isinstance(data_list, list):
                             self.update_status_signal.emit("❌ Получены некорректные данные: ожидался список.")
                             buffer = b''
                             continue
 
-                        # Собираем данные в буфер
                         self.lock.lock()
                         try:
-                            # ИСПРАВЛЕНИЕ: Используем append(), чтобы добавить список целиком
+                            # Используем append(), чтобы добавить список целиком
                             self.data_buffer.append(data_list)
 
-                            # Если данных в буфере достаточно, отправляем их
                             if len(self.data_buffer) >= self.time_step:
-                                # Извлекаем временное окно
                                 window = list(self.data_buffer)[-self.time_step:]
-                                # Отправляем window, которое теперь является списком списков
                                 self.data_received_signal.emit(window, self.time_step, self.threshold)
                         finally:
                             self.lock.unlock()
 
-                        buffer = b''  # Очищаем буфер после успешной обработки
+                        buffer = b''
 
                     except json.JSONDecodeError:
-                        # Если JSON неполный, продолжаем накапливать данные
                         continue
                     except Exception as e:
                         logger.error(f"Ошибка при обработке полученных данных: {e}", exc_info=True)
@@ -364,7 +408,6 @@ class OnlineTestingWorker(QtCore.QObject):
                         buffer = b''
 
         except socket.timeout:
-            # Таймаут - это нормально, просто проверяем, не нужно ли остановить поток
             if self.is_running:
                 QtCore.QTimer.singleShot(100, lambda: self.start_listening(port, time_step,
                                                                            threshold))

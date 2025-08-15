@@ -299,7 +299,7 @@ class OnlineTestingWorker(QtCore.QObject):
         self.socket.settimeout(1.0)  # Небольшой таймаут, чтобы поток можно было остановить
 
         try:
-            self.socket.bind(('0.0.0.0', port))
+            self.socket.bind(('127.0.0.1', port))
             self.socket.listen(1)
             self.update_status_signal.emit(f"✅ Сервер запущен, ожидаем подключения от сниффера...")
 

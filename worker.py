@@ -243,10 +243,17 @@ class MLWorker(QtCore.QObject):
             return
 
         try:
-            # Преобразуем список списков в NumPy-массив
+            if not data_list:
+                raise ValueError("Получен пустой список для обработки.")
+
+            # Преобразуем список в NumPy-массив
             data_array = np.array(data_list)
 
-            # Убедимся, что количество признаков совпадает
+            # Если массив одномерный, преобразуем его в двумерный (1, n)
+            if data_array.ndim == 1:
+                data_array = data_array.reshape(1, -1)
+
+            # Убедимся, что количество признаков совпадает с обученной моделью
             if data_array.shape[1] != self.scaler.n_features_in_:
                 raise ValueError(
                     f"Неверное количество признаков в онлайн-данных. Ожидается {self.scaler.n_features_in_}, получено {data_array.shape[1]}."
@@ -288,8 +295,8 @@ class OnlineTestingWorker(QtCore.QObject):
         super().__init__(parent)
         self.is_running = False
         self.socket = None
-        self.data_buffer = collections.deque(maxlen=100)  # Буфер для time_step пакетов
-        self.lock = QtCore.QMutex()  # Мьютекс для безопасной работы с буфером
+        self.data_buffer = collections.deque(maxlen=100)
+        self.lock = QtCore.QMutex()
 
     @QtCore.pyqtSlot(int, int, float)
     def start_listening(self, port, time_step, threshold):
@@ -304,7 +311,7 @@ class OnlineTestingWorker(QtCore.QObject):
         self.update_status_signal.emit(f"▶️ Запуск сервера для приема данных на порту: {port}...")
 
         self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.socket.settimeout(1.0)  # Небольшой таймаут, чтобы поток можно было остановить
+        self.socket.settimeout(1.0)
 
         try:
             self.socket.bind(('127.0.0.1', port))
@@ -327,10 +334,19 @@ class OnlineTestingWorker(QtCore.QObject):
                         decoded_data = buffer.decode('utf-8')
                         data_list = json.loads(decoded_data)
 
-                        # Собираем данные в буфер для создания временного окна
+                        # --- ИСПРАВЛЕНИЕ: ПРОВЕРКА НА ТИП ДАННЫХ ---
+                        # Убеждаемся, что data_list - это список.
+                        if not isinstance(data_list, list):
+                            self.update_status_signal.emit("❌ Получены некорректные данные: ожидался список.")
+                            buffer = b''
+                            continue
+
+                        # Собираем данные в буфер
                         self.lock.lock()
                         try:
+                            # Метод extend() добавляет каждый элемент списка по отдельности
                             self.data_buffer.extend(data_list)
+
                             # Если данных в буфере достаточно, отправляем их
                             if len(self.data_buffer) >= self.time_step:
                                 window = list(self.data_buffer)[-self.time_step:]
@@ -352,7 +368,7 @@ class OnlineTestingWorker(QtCore.QObject):
             # Таймаут - это нормально, просто проверяем, не нужно ли остановить поток
             if self.is_running:
                 QtCore.QTimer.singleShot(100, lambda: self.start_listening(port, time_step,
-                                                                           threshold))  # Перезапускаем ожидание
+                                                                           threshold))
         except Exception as e:
             self.update_status_signal.emit(f"❌ Ошибка при запуске сервера: {e}")
             logger.critical("Не удалось запустить сокет-сервер", exc_info=True)

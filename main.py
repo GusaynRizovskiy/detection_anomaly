@@ -192,8 +192,8 @@ class AutoencoderApp(QtWidgets.QDialog, Ui_Dialog):
         self.text_zone.appendPlainText(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] {message}")
 
     def setup_plots(self):
-        pg.setConfigOption('background', 'w')
-        pg.setConfigOption('foreground', 'k')
+        pg.setConfigOption('background', '#2c3e50')
+        pg.setConfigOption('foreground', '#ecf0f1')  # Светло-серый для меток и осей
 
         self.plot_loss = pg.PlotWidget()
         layout_loss = QtWidgets.QVBoxLayout(self.widget_plot_loss)
@@ -416,6 +416,17 @@ class AutoencoderApp(QtWidgets.QDialog, Ui_Dialog):
 # --- Главная точка входа ---
 if __name__ == "__main__":
     app = QtWidgets.QApplication(sys.argv)
+    qss_file_path = "dark_blue_theme.qss"
+    if os.path.exists(qss_file_path):
+        try:
+            with open(qss_file_path, "r") as f:
+                _style = f.read()
+                app.setStyleSheet(_style)
+                print("Стиль QSS успешно применен.")
+        except Exception as e:
+            print(f"Ошибка при загрузке QSS файла: {e}")
+    else:
+        print("Файл dark_blue_theme.qss не найден.")
     window = AutoencoderApp()
     window.showMaximized()
     sys.exit(app.exec_())

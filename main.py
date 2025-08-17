@@ -125,7 +125,6 @@ class AutoencoderApp(QtWidgets.QDialog, Ui_Dialog):
         logging.info("Приложение запущено и готово к работе.")
         self.set_ui_state_initial()
 
-    # ... (Остальные методы класса AutoencoderApp остаются без изменений)
 
     def set_ui_state_initial(self):
         """Устанавливает начальное состояние кнопок."""

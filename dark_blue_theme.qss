@@ -87,3 +87,16 @@ QWidget#widget_plot_anomaly_comparison {
     border: 1px solid #3498db;
     border-radius: 5px;
 }
+* {
+    font-family: "Segoe UI", "Tw Cen MT", sans-serif;
+    font-size: 10pt;
+}
+
+/* Переопределяем для заголовка, чтобы он оставался крупным */
+QLabel#label_name_of_programm {
+    font-size: 16pt;
+}
+
+QPlainTextEdit {
+    font-size: 9pt; /* Чуть меньше для области логов, чтобы помещалось больше текста */
+}

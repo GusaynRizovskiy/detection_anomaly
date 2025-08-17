@@ -342,7 +342,7 @@ class Ui_Dialog(object):
     def retranslateUi(self, Dialog):
         _translate = QtCore.QCoreApplication.translate
         Dialog.setWindowTitle(_translate("Dialog", "Автоэнкодер CNN-LSTM"))
-        self.label_name_of_programm.setText(_translate("Dialog", "Автоэнкодер CNN-LSTM"))
+        self.label_name_of_programm.setText(_translate("Dialog", "AnomalyGuard"))
         self.label_name_timestep_2.setText(_translate("Dialog", "Исходные данные"))
         self.label_name_timestep.setText(_translate("Dialog", "Размер окна"))
         self.label_name_epochs.setText(_translate("Dialog", "Количество эпох обучения"))

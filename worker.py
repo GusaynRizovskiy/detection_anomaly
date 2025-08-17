@@ -387,10 +387,15 @@ class OnlineTestingWorker(QtCore.QObject):
                             buffer = b''
                             continue
 
+                        # --- МОДИФИКАЦИЯ: НАЧАЛО ---
+                        # Удаляем первую метрику (время), чтобы соответствовать данным для обучения (26 метрик)
+                        metrics_only = data_list[1:]
+                        # --- МОДИФИКАЦИЯ: КОНЕЦ ---
+
                         self.lock.lock()
                         try:
-                            # Используем append(), чтобы добавить список целиком
-                            self.data_buffer.append(data_list)
+                            # Используем очищенные данные (26 метрик) для добавления в буфер
+                            self.data_buffer.append(metrics_only)
 
                             if len(self.data_buffer) >= self.time_step:
                                 window = list(self.data_buffer)[-self.time_step:]

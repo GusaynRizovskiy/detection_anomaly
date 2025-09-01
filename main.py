@@ -3,7 +3,6 @@ import os
 import sys
 import json
 from datetime import datetime
-import pandas as pd
 import numpy as np
 import pyqtgraph as pg
 import logging
